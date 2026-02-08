@@ -9,6 +9,8 @@ Key classes:
     QueryResult     SQL query results with multi-format export.
     Subscription    Synchronous continuous query subscription.
     AsyncSubscription  Asynchronous continuous query subscription.
+    StreamSubscription  Synchronous named-stream subscription.
+    AsyncStreamSubscription  Asynchronous named-stream subscription.
 
 Functions:
     open(path)      Open a file-based LaminarDB database.
@@ -24,6 +26,7 @@ Exceptions:
 """
 
 from laminardb._laminardb import (
+    AsyncStreamSubscription,
     AsyncSubscription,
     Connection,
     ConnectionError,
@@ -44,6 +47,7 @@ from laminardb._laminardb import (
     SourceMetrics,
     StreamInfo,
     StreamMetrics,
+    StreamSubscription,
     Subscription,
     SubscriptionError,
     Writer,
@@ -65,6 +69,8 @@ __all__ = [
     "QueryResult",
     "Subscription",
     "AsyncSubscription",
+    "StreamSubscription",
+    "AsyncStreamSubscription",
     # Catalog info
     "SourceInfo",
     "SinkInfo",

@@ -20,6 +20,7 @@ use crate::metrics::{
     PyPipelineMetrics, PyPipelineTopology, PySourceMetrics, PyStreamMetrics,
 };
 use crate::query::QueryResult;
+use crate::stream_subscription::{AsyncStreamSubscription, StreamSubscription};
 use crate::subscription::Subscription;
 use crate::writer::Writer;
 
@@ -180,6 +181,46 @@ impl PyConnection {
                 conn.query_stream(&sql).into_pyresult()?
             };
             Ok(AsyncSubscription::from_core(stream))
+        })
+    }
+
+    /// Subscribe to a named stream (sync iterator).
+    ///
+    /// Unlike `subscribe(sql)` which runs an arbitrary SQL streaming query,
+    /// this subscribes to a named stream created via
+    /// `CREATE STREAM ... AS SELECT ...`.
+    fn subscribe_stream(&self, py: Python<'_>, name: &str) -> PyResult<StreamSubscription> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let name = name.to_owned();
+        let sub = py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.subscribe(&name).into_pyresult()
+        })?;
+        Ok(StreamSubscription::from_core(sub))
+    }
+
+    /// Subscribe to a named stream (async iterator).
+    ///
+    /// Unlike `subscribe_async(sql)` which runs an arbitrary SQL streaming query,
+    /// this subscribes to a named stream created via
+    /// `CREATE STREAM ... AS SELECT ...`.
+    fn subscribe_stream_async<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let name = name.to_owned();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let _rt = runtime().enter();
+            let sub = {
+                let conn = inner.lock();
+                conn.subscribe(&name).into_pyresult()?
+            };
+            Ok(AsyncStreamSubscription::from_core(sub))
         })
     }
 

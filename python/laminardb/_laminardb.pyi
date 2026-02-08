@@ -225,6 +225,22 @@ class Connection:
         """Subscribe to a continuous query (async iterator)."""
         ...
 
+    def subscribe_stream(self, name: str) -> StreamSubscription:
+        """Subscribe to a named stream (sync iterator).
+
+        Unlike subscribe(sql), this subscribes to a named stream
+        created via CREATE STREAM ... AS SELECT ...
+        """
+        ...
+
+    async def subscribe_stream_async(self, name: str) -> AsyncStreamSubscription:
+        """Subscribe to a named stream (async iterator).
+
+        Unlike subscribe_async(sql), this subscribes to a named stream
+        created via CREATE STREAM ... AS SELECT ...
+        """
+        ...
+
     def schema(self, table: str) -> Any:
         """Get the schema of a table as a PyArrow Schema."""
         ...
@@ -469,6 +485,68 @@ class AsyncSubscription:
     def cancel(self) -> None:
         """Cancel the subscription."""
         ...
+
+# ---------------------------------------------------------------------------
+# StreamSubscription (true named-stream subscription)
+# ---------------------------------------------------------------------------
+
+class StreamSubscription:
+    """A synchronous subscription to a named stream.
+
+    Created via Connection.subscribe_stream(name). Unlike Subscription,
+    this subscribes to a named stream (created via CREATE STREAM ...),
+    not an arbitrary SQL query.
+    """
+
+    @property
+    def is_active(self) -> bool: ...
+    @property
+    def schema(self) -> Any:
+        """The subscription schema as a PyArrow Schema."""
+        ...
+
+    def next(self) -> QueryResult | None:
+        """Blocking wait for the next batch."""
+        ...
+
+    def next_timeout(self, timeout_ms: int) -> QueryResult | None:
+        """Blocking wait for the next batch with a timeout in milliseconds."""
+        ...
+
+    def try_next(self) -> QueryResult | None:
+        """Non-blocking poll for the next batch."""
+        ...
+
+    def cancel(self) -> None:
+        """Cancel the subscription."""
+        ...
+
+    def __repr__(self) -> str: ...
+    def __iter__(self) -> Iterator[QueryResult]: ...
+    def __next__(self) -> QueryResult: ...
+
+class AsyncStreamSubscription:
+    """An asynchronous subscription to a named stream.
+
+    Created via Connection.subscribe_stream_async(name). Unlike
+    AsyncSubscription, this subscribes to a named stream (created via
+    CREATE STREAM ...), not an arbitrary SQL query.
+    """
+
+    @property
+    def is_active(self) -> bool: ...
+    @property
+    def schema(self) -> Any:
+        """The subscription schema as a PyArrow Schema."""
+        ...
+
+    def cancel(self) -> None:
+        """Cancel the subscription."""
+        ...
+
+    def __repr__(self) -> str: ...
+    def __aiter__(self) -> AsyncIterator[QueryResult]: ...
+    async def __anext__(self) -> QueryResult: ...
 
 # ---------------------------------------------------------------------------
 # Catalog info
