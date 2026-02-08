@@ -4,6 +4,11 @@
 //! It exposes a high-level API for connecting to databases, inserting data
 //! in multiple formats, querying with SQL, and subscribing to continuous queries.
 
+// PyO3 0.27 deprecates `allow_threads` and `downcast` in favor of 0.28 APIs
+// (`detach` and `cast`), but pyo3-arrow 0.15 requires PyO3 0.27. Suppress
+// until the ecosystem catches up with 0.28.
+#![allow(deprecated)]
+
 mod async_support;
 mod connection;
 mod conversion;

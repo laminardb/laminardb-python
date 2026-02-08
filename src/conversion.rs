@@ -119,7 +119,7 @@ fn dict_to_batches(py: Python<'_>, dict: &Bound<'_, PyDict>) -> PyResult<Vec<Rec
     if is_columnar {
         columnar_dict_to_batch(py, dict)
     } else {
-        let list = PyList::new(py, &[dict.as_any()])?;
+        let list = PyList::new(py, [dict.as_any()])?;
         list_of_dicts_to_batches(py, &list)
     }
 }
