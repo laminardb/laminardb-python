@@ -45,6 +45,17 @@ class TestSyncSubscription:
         result = sub.try_next()
         assert result is None
 
+    def test_repr_active(self, conn):
+        sub = conn.subscribe(SAMPLE_SQL)
+        assert "active" in repr(sub)
+        sub.cancel()
+
+    def test_repr_after_cancel(self, conn):
+        sub = conn.subscribe(SAMPLE_SQL)
+        sub.cancel()
+        # cancel() stops the stream but doesn't drop it — repr shows "finished"
+        assert "finished" in repr(sub)
+
 
 class TestAsyncSubscription:
     @pytest.mark.asyncio
@@ -59,3 +70,16 @@ class TestAsyncSubscription:
         assert sub.is_active
         sub.cancel()  # cancel is synchronous
         assert not sub.is_active
+
+    @pytest.mark.asyncio
+    async def test_async_repr_active(self, conn):
+        sub = await conn.subscribe_async(SAMPLE_SQL)
+        assert "active" in repr(sub)
+        sub.cancel()
+
+    @pytest.mark.asyncio
+    async def test_async_repr_after_cancel(self, conn):
+        sub = await conn.subscribe_async(SAMPLE_SQL)
+        sub.cancel()
+        # cancel() stops the stream but doesn't drop it — repr shows "finished"
+        assert "finished" in repr(sub)

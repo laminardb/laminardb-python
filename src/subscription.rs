@@ -56,6 +56,15 @@ impl Subscription {
         })
     }
 
+    fn __repr__(&self) -> String {
+        let guard = self.inner.lock();
+        match guard.as_ref() {
+            Some(s) if s.is_active() => "Subscription(active)".to_owned(),
+            Some(_) => "Subscription(finished)".to_owned(),
+            None => "Subscription(cancelled)".to_owned(),
+        }
+    }
+
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }

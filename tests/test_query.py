@@ -87,6 +87,19 @@ class TestQueryResultProperties:
         result = conn.query(SAMPLE_SQL)
         assert result.num_columns == 3
 
+    def test_num_batches(self, conn):
+        result = conn.query(SAMPLE_SQL)
+        assert result.num_batches >= 1
+
+    @requires_pyarrow
+    def test_schema_property(self, conn):
+        import pyarrow as pa
+
+        result = conn.query(SAMPLE_SQL)
+        schema = result.schema
+        assert isinstance(schema, pa.Schema)
+        assert len(schema) == 3
+
     def test_repr(self, conn):
         result = conn.query(SAMPLE_SQL)
         assert "rows=3" in repr(result)
@@ -107,6 +120,31 @@ class TestStreamQuery:
         for batch in conn.stream(SAMPLE_SQL):
             total_rows += batch.num_rows
         assert total_rows == 3
+
+    def test_stream_is_active(self, conn):
+        stream = conn.stream(SAMPLE_SQL)
+        assert stream.is_active
+        # cancel to stop
+        stream.cancel()
+        assert not stream.is_active
+
+    def test_stream_cancel(self, conn):
+        stream = conn.stream(SAMPLE_SQL)
+        stream.cancel()
+        assert not stream.is_active
+
+    def test_stream_try_next(self, conn):
+        stream = conn.stream(SAMPLE_SQL)
+        # try_next may return a result or None (non-blocking)
+        result = stream.try_next()
+        assert result is None or isinstance(result, laminardb.QueryResult)
+        stream.cancel()
+
+    def test_stream_repr(self, conn):
+        stream = conn.stream(SAMPLE_SQL)
+        r = repr(stream)
+        assert "QueryStream" in r
+        stream.cancel()
 
 
 class TestQueryErrors:

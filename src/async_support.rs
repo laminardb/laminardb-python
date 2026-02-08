@@ -65,6 +65,15 @@ impl AsyncSubscription {
         })
     }
 
+    fn __repr__(&self) -> String {
+        let guard = self.inner.lock();
+        match guard.as_ref() {
+            Some(s) if s.is_active() => "AsyncSubscription(active)".to_owned(),
+            Some(_) => "AsyncSubscription(finished)".to_owned(),
+            None => "AsyncSubscription(cancelled)".to_owned(),
+        }
+    }
+
     fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }

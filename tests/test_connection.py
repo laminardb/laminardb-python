@@ -47,6 +47,58 @@ class TestTableOperations:
         assert "value" in field_names
 
 
+class TestConnectionProperties:
+    def test_is_closed_false_when_open(self, db):
+        assert db.is_closed is False
+
+    def test_is_closed_true_after_close(self, tmp_path):
+        conn = laminardb.open(str(tmp_path / "test.db"))
+        conn.close()
+        assert conn.is_closed is True
+
+    def test_is_checkpoint_enabled(self, db):
+        # Just verify the property is accessible and returns a bool
+        result = db.is_checkpoint_enabled
+        assert isinstance(result, bool)
+
+    def test_checkpoint_disabled_raises(self, db):
+        # Checkpointing is disabled by default; checkpoint() raises
+        with pytest.raises(laminardb.LaminarError):
+            db.checkpoint()
+
+
+class TestPipelineOperations:
+    def test_list_streams(self, db):
+        streams = db.list_streams()
+        assert isinstance(streams, list)
+
+    def test_list_sinks(self, db):
+        sinks = db.list_sinks()
+        assert isinstance(sinks, list)
+
+    def test_start(self, db):
+        # start() should not raise on a fresh connection
+        db.start()
+
+    def test_list_streams_after_close_raises(self, tmp_path):
+        conn = laminardb.open(str(tmp_path / "test.db"))
+        conn.close()
+        with pytest.raises(laminardb.ConnectionError, match="closed"):
+            conn.list_streams()
+
+    def test_list_sinks_after_close_raises(self, tmp_path):
+        conn = laminardb.open(str(tmp_path / "test.db"))
+        conn.close()
+        with pytest.raises(laminardb.ConnectionError, match="closed"):
+            conn.list_sinks()
+
+    def test_start_after_close_raises(self, tmp_path):
+        conn = laminardb.open(str(tmp_path / "test.db"))
+        conn.close()
+        with pytest.raises(laminardb.ConnectionError, match="closed"):
+            conn.start()
+
+
 class TestConnectionRepr:
     def test_repr_open(self, db):
         assert "open" in repr(db)

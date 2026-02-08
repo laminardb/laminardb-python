@@ -49,6 +49,15 @@ class SubscriptionError(LaminarError):
 class Connection:
     """A connection to a LaminarDB database."""
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the connection is closed."""
+        ...
+    @property
+    def is_checkpoint_enabled(self) -> bool:
+        """Whether checkpointing is enabled for this connection."""
+        ...
+
     def __enter__(self) -> Connection: ...
     def __exit__(
         self,
@@ -78,7 +87,7 @@ class Connection:
         """Execute a SQL query and return the full result."""
         ...
 
-    def stream(self, sql: str) -> Iterator[QueryResult]:
+    def stream(self, sql: str) -> _QueryStreamIter:
         """Execute a SQL query and stream results in batches."""
         ...
 
@@ -99,7 +108,23 @@ class Connection:
         ...
 
     def list_tables(self) -> list[str]:
-        """List all tables in the database."""
+        """List all sources in the database."""
+        ...
+
+    def list_streams(self) -> list[str]:
+        """List all streams in the database."""
+        ...
+
+    def list_sinks(self) -> list[str]:
+        """List all sinks in the database."""
+        ...
+
+    def start(self) -> None:
+        """Start the streaming pipeline."""
+        ...
+
+    def checkpoint(self) -> int | None:
+        """Trigger a checkpoint. Returns the checkpoint ID or None."""
         ...
 
     def execute(self, sql: str) -> int:
@@ -117,6 +142,19 @@ class Connection:
 class Writer:
     """A streaming writer for batched inserts into a table."""
 
+    @property
+    def name(self) -> str:
+        """The name of the source this writer is writing to."""
+        ...
+    @property
+    def schema(self) -> Any:
+        """The schema of the source as a PyArrow Schema."""
+        ...
+    @property
+    def current_watermark(self) -> int:
+        """The current watermark value."""
+        ...
+
     def __enter__(self) -> Writer: ...
     def __exit__(
         self,
@@ -124,6 +162,7 @@ class Writer:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None: ...
+    def __repr__(self) -> str: ...
 
     def insert(self, data: DataInput) -> None:
         """Add data to the write buffer."""
@@ -131,6 +170,10 @@ class Writer:
 
     def flush(self) -> int:
         """Flush the buffer to the database. Returns rows written."""
+        ...
+
+    def watermark(self, timestamp: int) -> None:
+        """Emit a watermark timestamp."""
         ...
 
     def close(self) -> None:
@@ -145,11 +188,19 @@ class QueryResult:
     """The result of a SQL query."""
 
     @property
+    def schema(self) -> Any:
+        """The schema as a PyArrow Schema."""
+        ...
+    @property
     def num_rows(self) -> int: ...
     @property
     def num_columns(self) -> int: ...
     @property
+    def num_batches(self) -> int: ...
+    @property
     def columns(self) -> list[str]: ...
+
+    def __repr__(self) -> str: ...
 
     def to_arrow(self) -> Any:
         """Convert to a PyArrow Table."""
@@ -176,6 +227,30 @@ class QueryResult:
         ...
 
 # ---------------------------------------------------------------------------
+# QueryStream
+# ---------------------------------------------------------------------------
+
+class _QueryStreamIter:
+    """A streaming query result iterator."""
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the stream is still active."""
+        ...
+
+    def try_next(self) -> QueryResult | None:
+        """Non-blocking poll for the next result batch."""
+        ...
+
+    def cancel(self) -> None:
+        """Cancel the stream."""
+        ...
+
+    def __repr__(self) -> str: ...
+    def __iter__(self) -> Iterator[QueryResult]: ...
+    def __next__(self) -> QueryResult: ...
+
+# ---------------------------------------------------------------------------
 # Subscription
 # ---------------------------------------------------------------------------
 
@@ -185,6 +260,7 @@ class Subscription:
     @property
     def is_active(self) -> bool: ...
 
+    def __repr__(self) -> str: ...
     def __iter__(self) -> Iterator[QueryResult]: ...
     def __next__(self) -> QueryResult: ...
 
@@ -202,6 +278,7 @@ class AsyncSubscription:
     @property
     def is_active(self) -> bool: ...
 
+    def __repr__(self) -> str: ...
     def __aiter__(self) -> AsyncIterator[QueryResult]: ...
     async def __anext__(self) -> QueryResult: ...
 

@@ -3,6 +3,7 @@
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use pyo3::prelude::*;
+use pyo3_arrow::PySchema;
 
 use crate::conversion;
 
@@ -28,6 +29,20 @@ impl QueryResult {
     #[getter]
     fn num_columns(&self) -> usize {
         self.schema.fields().len()
+    }
+
+    /// The schema as a PyArrow Schema.
+    #[getter]
+    fn schema(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let py_schema = PySchema::from(self.schema.clone());
+        let obj = py_schema.into_pyarrow(py)?;
+        Ok(obj.into_pyobject(py)?.into_any().unbind())
+    }
+
+    /// Number of batches in the result.
+    #[getter]
+    fn num_batches(&self) -> usize {
+        self.batches.len()
     }
 
     /// Column names.

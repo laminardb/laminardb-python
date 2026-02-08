@@ -110,3 +110,55 @@ class TestWriter:
         with db.writer("sensors") as w:
             w.insert(sample_data["rows"])
             w.flush()
+
+
+class TestWriterProperties:
+    def test_writer_name(self, db):
+        with db.writer("sensors") as w:
+            assert w.name == "sensors"
+
+    @requires_pyarrow
+    def test_writer_schema(self, db):
+        import pyarrow as pa
+
+        with db.writer("sensors") as w:
+            schema = w.schema
+            assert isinstance(schema, pa.Schema)
+            field_names = [schema.field(i).name for i in range(len(schema))]
+            assert "ts" in field_names
+            assert "value" in field_names
+
+    def test_writer_watermark(self, db):
+        with db.writer("sensors") as w:
+            w.watermark(1000)
+            assert w.current_watermark == 1000
+
+    def test_writer_watermark_advances(self, db):
+        with db.writer("sensors") as w:
+            w.watermark(100)
+            assert w.current_watermark == 100
+            w.watermark(200)
+            assert w.current_watermark == 200
+
+    def test_writer_repr_open(self, db):
+        with db.writer("sensors") as w:
+            r = repr(w)
+            assert "sensors" in r
+            assert "open" in r
+
+    def test_writer_repr_closed(self, db):
+        writer = db.writer("sensors")
+        writer.close()
+        assert "closed" in repr(writer)
+
+    def test_writer_name_after_close_raises(self, db):
+        writer = db.writer("sensors")
+        writer.close()
+        with pytest.raises(laminardb.IngestionError):
+            _ = writer.name
+
+    def test_writer_schema_after_close_raises(self, db):
+        writer = db.writer("sensors")
+        writer.close()
+        with pytest.raises(laminardb.IngestionError):
+            _ = writer.schema

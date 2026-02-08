@@ -228,6 +228,68 @@ impl PyConnection {
         })
     }
 
+    /// List all streams in the database.
+    fn list_streams(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.list_streams())
+        })
+    }
+
+    /// List all sinks in the database.
+    fn list_sinks(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.list_sinks())
+        })
+    }
+
+    /// Start the streaming pipeline.
+    fn start(&self, py: Python<'_>) -> PyResult<()> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.start().into_pyresult()
+        })
+    }
+
+    /// Whether the connection is closed.
+    #[getter]
+    fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    /// Trigger a checkpoint. Returns the checkpoint ID on success, or None.
+    fn checkpoint(&self, py: Python<'_>) -> PyResult<Option<u64>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.checkpoint().into_pyresult()
+        })
+    }
+
+    /// Whether checkpointing is enabled for this connection.
+    #[getter]
+    fn is_checkpoint_enabled(&self, py: Python<'_>) -> PyResult<bool> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.is_checkpoint_enabled())
+        })
+    }
+
     /// Execute a SQL statement (DDL or DML). Returns rows affected for DML, 0 for DDL.
     fn execute(&self, py: Python<'_>, sql: &str) -> PyResult<u64> {
         self.check_closed()?;
@@ -339,6 +401,43 @@ unsafe impl Sync for QueryStreamIter {}
 
 #[pymethods]
 impl QueryStreamIter {
+    /// Non-blocking poll for the next result batch.
+    fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let mut stream = self.inner.lock();
+            match stream.try_next().into_pyresult()? {
+                Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Whether the stream is still active.
+    #[getter]
+    fn is_active(&self) -> bool {
+        let stream = self.inner.lock();
+        stream.is_active()
+    }
+
+    /// Cancel the stream.
+    fn cancel(&self, py: Python<'_>) -> PyResult<()> {
+        py.allow_threads(|| {
+            let mut stream = self.inner.lock();
+            stream.cancel();
+            Ok(())
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        let stream = self.inner.lock();
+        if stream.is_active() {
+            "QueryStream(active)".to_owned()
+        } else {
+            "QueryStream(finished)".to_owned()
+        }
+    }
+
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
