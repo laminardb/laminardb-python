@@ -9,11 +9,11 @@ use parking_lot::Mutex;
 use pyo3::prelude::*;
 use pyo3_arrow::PySchema;
 
+use crate::async_support::AsyncSubscription;
 use crate::conversion;
 use crate::error::{ConnectionError, IntoPyResult};
 use crate::query::QueryResult;
 use crate::subscription::Subscription;
-use crate::async_support::AsyncSubscription;
 use crate::writer::Writer;
 
 /// A connection to a LaminarDB database.
@@ -115,7 +115,9 @@ impl PyConnection {
             let conn = inner.lock();
             conn.query_stream(&sql).into_pyresult()
         })?;
-        Ok(QueryStreamIter { inner: Mutex::new(stream) })
+        Ok(QueryStreamIter {
+            inner: Mutex::new(stream),
+        })
     }
 
     /// Subscribe to a continuous query (sync iterator).

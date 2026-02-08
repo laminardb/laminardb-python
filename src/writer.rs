@@ -55,9 +55,7 @@ impl Writer {
             guard.take()
         };
         if let Some(w) = writer {
-            py.allow_threads(|| {
-                w.close().into_pyresult()
-            })?;
+            py.allow_threads(|| w.close().into_pyresult())?;
         }
         Ok(())
     }

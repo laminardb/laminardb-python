@@ -25,7 +25,11 @@ use crate::error::IngestionError;
 // ---------------------------------------------------------------------------
 
 /// Extract Arrow `RecordBatch`es from a Python object using the best available path.
-pub fn python_to_batches(py: Python<'_>, data: &Bound<'_, PyAny>, _schema: Option<&Schema>) -> PyResult<Vec<RecordBatch>> {
+pub fn python_to_batches(
+    py: Python<'_>,
+    data: &Bound<'_, PyAny>,
+    _schema: Option<&Schema>,
+) -> PyResult<Vec<RecordBatch>> {
     // 1. Arrow PyCapsule interface (PyTable handles __arrow_c_stream__)
     if let Ok(table) = data.extract::<PyTable>() {
         let (batches, _schema) = table.into_inner();
@@ -60,7 +64,9 @@ pub fn python_to_batches(py: Python<'_>, data: &Bound<'_, PyAny>, _schema: Optio
 
 /// Try converting a Pandas DataFrame via PyArrow.
 fn try_pandas(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Vec<RecordBatch>> {
-    let pd = py.import("pandas").map_err(|_| PyTypeError::new_err("not pandas"))?;
+    let pd = py
+        .import("pandas")
+        .map_err(|_| PyTypeError::new_err("not pandas"))?;
     let df_type = pd.getattr("DataFrame")?;
 
     if !data.is_instance(&df_type)? {
@@ -76,7 +82,9 @@ fn try_pandas(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Vec<RecordBat
 
 /// Try converting a Polars DataFrame via `.to_arrow()`.
 fn try_polars(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Vec<RecordBatch>> {
-    let pl = py.import("polars").map_err(|_| PyTypeError::new_err("not polars"))?;
+    let pl = py
+        .import("polars")
+        .map_err(|_| PyTypeError::new_err("not polars"))?;
     let df_type = pl.getattr("DataFrame")?;
 
     if !data.is_instance(&df_type)? {
@@ -112,7 +120,9 @@ fn try_python_dicts(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Vec<Rec
 /// If values are lists → columnar format.
 /// If values are scalars → single row.
 fn dict_to_batches(py: Python<'_>, dict: &Bound<'_, PyDict>) -> PyResult<Vec<RecordBatch>> {
-    let first_value = dict.values().get_item(0)
+    let first_value = dict
+        .values()
+        .get_item(0)
         .map_err(|_| PyTypeError::new_err("empty dict"))?;
     let is_columnar = first_value.downcast::<PyList>().is_ok();
 
@@ -134,7 +144,10 @@ fn columnar_dict_to_batch(py: Python<'_>, dict: &Bound<'_, PyDict>) -> PyResult<
 }
 
 /// Convert a list of dicts to RecordBatch via JSON parsing.
-fn list_of_dicts_to_batches(py: Python<'_>, list: &Bound<'_, PyList>) -> PyResult<Vec<RecordBatch>> {
+fn list_of_dicts_to_batches(
+    py: Python<'_>,
+    list: &Bound<'_, PyList>,
+) -> PyResult<Vec<RecordBatch>> {
     let json_mod = py.import("json")?;
     let json_str: String = json_mod.call_method1("dumps", (list,))?.extract()?;
     json_str_to_batches(&json_str)
@@ -159,9 +172,7 @@ pub fn json_str_to_batches(json: &str) -> PyResult<Vec<RecordBatch>> {
 
     let mut batches = Vec::new();
     for batch in reader {
-        batches.push(
-            batch.map_err(|e| IngestionError::new_err(format!("JSON read error: {e}")))?,
-        );
+        batches.push(batch.map_err(|e| IngestionError::new_err(format!("JSON read error: {e}")))?);
     }
     Ok(batches)
 }
@@ -184,9 +195,7 @@ pub fn csv_str_to_batches(csv: &str) -> PyResult<Vec<RecordBatch>> {
 
     let mut batches = Vec::new();
     for batch in reader {
-        batches.push(
-            batch.map_err(|e| IngestionError::new_err(format!("CSV read error: {e}")))?,
-        );
+        batches.push(batch.map_err(|e| IngestionError::new_err(format!("CSV read error: {e}")))?);
     }
     Ok(batches)
 }
@@ -196,33 +205,53 @@ pub fn csv_str_to_batches(csv: &str) -> PyResult<Vec<RecordBatch>> {
 // ---------------------------------------------------------------------------
 
 /// Convert RecordBatches to a PyArrow Table.
-pub fn batches_to_pyarrow<'py>(py: Python<'py>, batches: &[RecordBatch], schema: &SchemaRef) -> PyResult<Bound<'py, PyAny>> {
+pub fn batches_to_pyarrow<'py>(
+    py: Python<'py>,
+    batches: &[RecordBatch],
+    schema: &SchemaRef,
+) -> PyResult<Bound<'py, PyAny>> {
     let py_table = PyTable::try_new(batches.to_vec(), schema.clone())?;
     let result: Bound<'py, PyAny> = py_table.into_pyarrow(py)?;
     Ok(result)
 }
 
 /// Convert RecordBatches to a Pandas DataFrame.
-pub fn batches_to_pandas<'py>(py: Python<'py>, batches: &[RecordBatch], schema: &SchemaRef) -> PyResult<Bound<'py, PyAny>> {
+pub fn batches_to_pandas<'py>(
+    py: Python<'py>,
+    batches: &[RecordBatch],
+    schema: &SchemaRef,
+) -> PyResult<Bound<'py, PyAny>> {
     let table = batches_to_pyarrow(py, batches, schema)?;
     table.call_method0("to_pandas")
 }
 
 /// Convert RecordBatches to a Polars DataFrame.
-pub fn batches_to_polars<'py>(py: Python<'py>, batches: &[RecordBatch], schema: &SchemaRef) -> PyResult<Bound<'py, PyAny>> {
+pub fn batches_to_polars<'py>(
+    py: Python<'py>,
+    batches: &[RecordBatch],
+    schema: &SchemaRef,
+) -> PyResult<Bound<'py, PyAny>> {
     let pl = py.import("polars")?;
     let table = batches_to_pyarrow(py, batches, schema)?;
     pl.call_method1("from_arrow", (table,))
 }
 
 /// Convert RecordBatches to a Python dict (columnar via PyArrow).
-pub fn batches_to_dicts<'py>(py: Python<'py>, batches: &[RecordBatch], schema: &SchemaRef) -> PyResult<Bound<'py, PyAny>> {
+pub fn batches_to_dicts<'py>(
+    py: Python<'py>,
+    batches: &[RecordBatch],
+    schema: &SchemaRef,
+) -> PyResult<Bound<'py, PyAny>> {
     let table = batches_to_pyarrow(py, batches, schema)?;
     table.call_method0("to_pydict")
 }
 
 /// Auto-detect the best available output library.
-pub fn batches_to_best_df<'py>(py: Python<'py>, batches: &[RecordBatch], schema: &SchemaRef) -> PyResult<Bound<'py, PyAny>> {
+pub fn batches_to_best_df<'py>(
+    py: Python<'py>,
+    batches: &[RecordBatch],
+    schema: &SchemaRef,
+) -> PyResult<Bound<'py, PyAny>> {
     if py.import("polars").is_ok() {
         return batches_to_polars(py, batches, schema);
     }
@@ -283,7 +312,12 @@ fn parse_type_string(s: &str) -> PyResult<arrow_schema::DataType> {
         "large_string" | "large_utf8" => Ok(DataType::LargeUtf8),
         "binary" | "bytes" => Ok(DataType::Binary),
         "date32" | "date" => Ok(DataType::Date32),
-        "timestamp" | "datetime" => Ok(DataType::Timestamp(arrow_schema::TimeUnit::Microsecond, None)),
-        _ => Err(crate::error::SchemaError::new_err(format!("Unknown type: {s}"))),
+        "timestamp" | "datetime" => Ok(DataType::Timestamp(
+            arrow_schema::TimeUnit::Microsecond,
+            None,
+        )),
+        _ => Err(crate::error::SchemaError::new_err(format!(
+            "Unknown type: {s}"
+        ))),
     }
 }
