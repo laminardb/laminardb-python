@@ -1,6 +1,8 @@
 //! Python `Connection` class wrapping `laminar_db::api::Connection`.
 //!
 //! All blocking operations release the GIL via `py.allow_threads()`.
+//! All API calls enter the global Tokio runtime context so that background
+//! tasks spawned by laminar-db (e.g. query stream bridges) actually execute.
 
 use std::sync::Arc;
 
@@ -9,9 +11,9 @@ use parking_lot::Mutex;
 use pyo3::prelude::*;
 use pyo3_arrow::PySchema;
 
-use crate::async_support::AsyncSubscription;
+use crate::async_support::{AsyncSubscription, runtime};
 use crate::conversion;
-use crate::error::{ConnectionError, IntoPyResult};
+use crate::error::{ConnectionError, IntoPyResult, QueryError};
 use crate::query::QueryResult;
 use crate::subscription::Subscription;
 use crate::writer::Writer;
@@ -41,6 +43,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let table = table.to_owned();
         py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             let mut total = 0u64;
             for batch in &batches {
@@ -57,6 +60,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let table = table.to_owned();
         py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             let mut total = 0u64;
             for batch in &batches {
@@ -73,6 +77,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let table = table.to_owned();
         py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             let mut total = 0u64;
             for batch in &batches {
@@ -88,6 +93,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let table = table.to_owned();
         let writer = py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             conn.writer(&table).into_pyresult()
         })?;
@@ -95,14 +101,37 @@ impl PyConnection {
     }
 
     /// Execute a SQL query and return the full result.
+    ///
+    /// Uses `execute()` internally and consumes the query stream with blocking
+    /// `next()` calls to avoid the race condition in the API's `query()` method
+    /// (which uses non-blocking `try_next()` that returns before data arrives).
     fn query(&self, py: Python<'_>, sql: &str) -> PyResult<QueryResult> {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
         py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
-            let result = conn.query(&sql).into_pyresult()?;
-            Ok(QueryResult::from_core(result))
+            let result = conn.execute(&sql).into_pyresult()?;
+            match result {
+                laminar_db::api::ExecuteResult::Query(mut stream) => {
+                    let schema = stream.schema();
+                    let mut batches = Vec::new();
+                    // Use blocking next() — waits for data from the background
+                    // tokio task that bridges the DataFusion stream.
+                    while let Some(batch) = stream.next().into_pyresult()? {
+                        batches.push(batch);
+                    }
+                    Ok(QueryResult::new(batches, schema))
+                }
+                laminar_db::api::ExecuteResult::Metadata(batch) => {
+                    Ok(QueryResult::from_batch(batch))
+                }
+                _ => Err(QueryError::new_err(format!(
+                    "Expected query result, got DDL/DML: {}",
+                    sql
+                ))),
+            }
         })
     }
 
@@ -112,6 +141,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let sql = sql.to_owned();
         let stream = py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             conn.query_stream(&sql).into_pyresult()
         })?;
@@ -125,12 +155,8 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
-        let _exec = py.allow_threads(|| {
-            let conn = inner.lock();
-            conn.execute(&sql).into_pyresult()
-        })?;
-        // For subscriptions, we query_stream and wrap it
         let stream = py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             conn.query_stream(&sql).into_pyresult()
         })?;
@@ -143,6 +169,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let sql = sql.to_owned();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let _rt = runtime().enter();
             let stream = {
                 let conn = inner.lock();
                 conn.query_stream(&sql).into_pyresult()?
@@ -157,6 +184,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let table = table.to_owned();
         let schema: SchemaRef = py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             conn.get_schema(&table).into_pyresult()
         })?;
@@ -166,19 +194,24 @@ impl PyConnection {
     }
 
     /// Create a new source via SQL DDL.
+    ///
+    /// Creates a SOURCE for insert/writer operations. The source is also
+    /// registered for streaming queries.
     fn create_table(&self, py: Python<'_>, name: &str, schema: &Bound<'_, PyAny>) -> PyResult<()> {
         self.check_closed()?;
         let arrow_schema = conversion::python_to_schema(py, schema)?;
-        // Build a CREATE SOURCE DDL statement
         let columns: Vec<String> = arrow_schema
             .fields()
             .iter()
             .map(|f| format!("{} {}", f.name(), arrow_type_to_sql(f.data_type())))
             .collect();
-        let ddl = format!("CREATE SOURCE {} ({})", name, columns.join(", "));
+        let col_defs = columns.join(", ");
         let inner = self.inner.clone();
+        let name = name.to_owned();
         py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
+            let ddl = format!("CREATE SOURCE {} ({})", name, col_defs);
             conn.execute(&ddl).into_pyresult()?;
             Ok(())
         })
@@ -189,8 +222,25 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         py.allow_threads(|| {
+            let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.list_sources())
+        })
+    }
+
+    /// Execute a SQL statement (DDL or DML). Returns rows affected for DML, 0 for DDL.
+    fn execute(&self, py: Python<'_>, sql: &str) -> PyResult<u64> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let sql = sql.to_owned();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            let result = conn.execute(&sql).into_pyresult()?;
+            match result {
+                laminar_db::api::ExecuteResult::RowsAffected(n) => Ok(n),
+                _ => Ok(0),
+            }
         })
     }
 
@@ -198,11 +248,9 @@ impl PyConnection {
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if !self.closed {
             self.closed = true;
-            // Connection::close consumes self, so we need to take it out
-            // Since we use Arc<Mutex<>>, we attempt close if we're the last reference
             let inner = self.inner.clone();
             py.allow_threads(|| -> PyResult<()> {
-                // Try to take ownership for close; if other refs exist, drop will handle it
+                let _rt = runtime().enter();
                 if let Ok(mutex) = Arc::try_unwrap(inner) {
                     let conn = mutex.into_inner();
                     let _ = conn.close();
@@ -297,6 +345,7 @@ impl QueryStreamIter {
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
         let result = py.allow_threads(|| {
+            let _rt = runtime().enter();
             let mut stream = self.inner.lock();
             stream.next().into_pyresult()
         })?;

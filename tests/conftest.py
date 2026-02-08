@@ -41,7 +41,7 @@ requires_pyarrow = pytest.mark.skipif(not HAS_PYARROW, reason="pyarrow not insta
 
 @pytest.fixture
 def db(tmp_path):
-    """Open an in-memory LaminarDB connection with a test table."""
+    """Open a LaminarDB connection with a test source."""
     conn = laminardb.open(str(tmp_path / "test.db"))
     conn.create_table(
         "sensors",

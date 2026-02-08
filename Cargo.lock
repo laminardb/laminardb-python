@@ -2068,6 +2068,7 @@ dependencies = [
  "pyo3",
  "pyo3-arrow",
  "pyo3-async-runtimes",
+ "serde_json",
  "tokio",
 ]
 

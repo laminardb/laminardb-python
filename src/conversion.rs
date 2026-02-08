@@ -30,29 +30,31 @@ pub fn python_to_batches(
     data: &Bound<'_, PyAny>,
     _schema: Option<&Schema>,
 ) -> PyResult<Vec<RecordBatch>> {
-    // 1. Arrow PyCapsule interface (PyTable handles __arrow_c_stream__)
+    // 1. Plain Python dicts and lists — check FIRST to avoid Arrow extraction
+    //    intercepting native Python types (pyo3-arrow's extract can consume errors
+    //    that prevent fallthrough to the dict/list handler).
+    if data.downcast::<PyDict>().is_ok() || data.downcast::<PyList>().is_ok() {
+        return try_python_dicts(py, data);
+    }
+
+    // 2. Arrow PyCapsule interface (PyTable handles __arrow_c_stream__)
     if let Ok(table) = data.extract::<PyTable>() {
         let (batches, _schema) = table.into_inner();
         return Ok(batches);
     }
 
-    // 2. Try as single RecordBatch (__arrow_c_array__)
+    // 3. Try as single RecordBatch (__arrow_c_array__)
     if let Ok(batch) = data.extract::<PyRecordBatch>() {
         return Ok(vec![batch.into_inner()]);
     }
 
-    // 3. Pandas DataFrame
+    // 4. Pandas DataFrame
     if let Ok(batches) = try_pandas(py, data) {
         return Ok(batches);
     }
 
-    // 4. Polars DataFrame
+    // 5. Polars DataFrame
     if let Ok(batches) = try_polars(py, data) {
-        return Ok(batches);
-    }
-
-    // 5–7. Python dicts / lists
-    if let Ok(batches) = try_python_dicts(py, data) {
         return Ok(batches);
     }
 
@@ -143,14 +145,38 @@ fn columnar_dict_to_batch(py: Python<'_>, dict: &Bound<'_, PyDict>) -> PyResult<
     Ok(batches)
 }
 
-/// Convert a list of dicts to RecordBatch via JSON parsing.
+/// Convert a list of dicts to RecordBatch.
+///
+/// Tries pyarrow `Table.from_pylist` first (handles complex types),
+/// falls back to NDJSON serialization via Python's `json` module.
 fn list_of_dicts_to_batches(
     py: Python<'_>,
     list: &Bound<'_, PyList>,
 ) -> PyResult<Vec<RecordBatch>> {
+    // Try pyarrow first (most efficient, handles numpy types etc.)
+    if let Ok(pa) = py.import("pyarrow") {
+        if let Ok(table) = pa
+            .getattr("Table")
+            .and_then(|t| t.call_method1("from_pylist", (list,)))
+        {
+            if let Ok(py_table) = table.extract::<PyTable>() {
+                let (batches, _schema) = py_table.into_inner();
+                return Ok(batches);
+            }
+        }
+    }
+
+    // Fallback: serialize each dict as NDJSON (one JSON object per line).
+    // arrow_json expects NDJSON, not a JSON array.
     let json_mod = py.import("json")?;
-    let json_str: String = json_mod.call_method1("dumps", (list,))?.extract()?;
-    json_str_to_batches(&json_str)
+    let mut ndjson = String::new();
+    for i in 0..list.len() {
+        let item = list.get_item(i)?;
+        let line: String = json_mod.call_method1("dumps", (&item,))?.extract()?;
+        ndjson.push_str(&line);
+        ndjson.push('\n');
+    }
+    json_str_to_batches(&ndjson)
 }
 
 // ---------------------------------------------------------------------------
@@ -158,14 +184,39 @@ fn list_of_dicts_to_batches(
 // ---------------------------------------------------------------------------
 
 /// Parse a JSON string into Arrow RecordBatches.
+///
+/// Accepts both NDJSON (one object per line) and JSON arrays (`[{...}, ...]`).
 pub fn json_str_to_batches(json: &str) -> PyResult<Vec<RecordBatch>> {
-    // Infer schema from the JSON data first
-    let cursor = std::io::Cursor::new(json.as_bytes());
+    let trimmed = json.trim();
+
+    // arrow_json expects NDJSON format. Convert JSON arrays if needed.
+    let owned_ndjson;
+    let input = if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        // Parse JSON array and re-serialize as NDJSON
+        let value: serde_json::Value = serde_json::from_str(trimmed)
+            .map_err(|e| IngestionError::new_err(format!("JSON parse error: {e}")))?;
+        match value {
+            serde_json::Value::Array(arr) => {
+                owned_ndjson = arr
+                    .into_iter()
+                    .map(|v| serde_json::to_string(&v).unwrap_or_default())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                owned_ndjson.as_str()
+            }
+            _ => trimmed,
+        }
+    } else {
+        trimmed
+    };
+
+    // Infer schema from the JSON data
+    let cursor = std::io::Cursor::new(input.as_bytes());
     let (inferred, _) = arrow_json::reader::infer_json_schema(cursor, None)
         .map_err(|e| IngestionError::new_err(format!("JSON schema inference error: {e}")))?;
     let schema = Arc::new(inferred);
 
-    let cursor = std::io::Cursor::new(json.as_bytes());
+    let cursor = std::io::Cursor::new(input.as_bytes());
     let reader = arrow_json::ReaderBuilder::new(schema)
         .build(cursor)
         .map_err(|e| IngestionError::new_err(format!("JSON parse error: {e}")))?;

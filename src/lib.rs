@@ -53,6 +53,7 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyfunction]
 fn open(py: Python<'_>, _path: &str) -> PyResult<PyConnection> {
     py.allow_threads(|| {
+        let _rt = async_support::runtime().enter();
         let conn = laminar_db::api::Connection::open().into_pyresult()?;
         Ok(PyConnection::from_core(conn))
     })
@@ -65,7 +66,7 @@ fn open(py: Python<'_>, _path: &str) -> PyResult<PyConnection> {
 #[pyfunction]
 fn connect(py: Python<'_>, _uri: &str) -> PyResult<PyConnection> {
     py.allow_threads(|| {
-        // Connection::open() is the entry point; config can set storage path
+        let _rt = async_support::runtime().enter();
         let conn = laminar_db::api::Connection::open().into_pyresult()?;
         Ok(PyConnection::from_core(conn))
     })

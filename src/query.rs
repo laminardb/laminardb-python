@@ -89,6 +89,11 @@ impl QueryResult {
 }
 
 impl QueryResult {
+    /// Create from pre-collected batches and schema.
+    pub fn new(batches: Vec<RecordBatch>, schema: SchemaRef) -> Self {
+        Self { batches, schema }
+    }
+
     /// Create from a core query result.
     pub fn from_core(result: laminar_db::api::QueryResult) -> Self {
         let schema = result.schema();

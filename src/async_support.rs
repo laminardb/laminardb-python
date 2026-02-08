@@ -13,13 +13,15 @@ use crate::query::QueryResult;
 // Global Tokio runtime
 // ---------------------------------------------------------------------------
 
-// The global runtime is currently unused because laminar_db::api::Connection
-// is synchronous. It will be needed when we add true async connection methods.
-#[allow(dead_code)]
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Get or create the global Tokio runtime.
-#[allow(dead_code)]
+///
+/// laminar-db uses `tokio::Handle::try_current()` to detect an existing runtime.
+/// If none is found, it creates a temporary current-thread runtime per call,
+/// which causes background tasks (spawned during query execution) to be dropped
+/// before they complete. By entering this persistent multi-thread runtime before
+/// all API calls, spawned tasks run on our worker pool and complete properly.
 pub fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()

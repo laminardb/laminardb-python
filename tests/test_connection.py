@@ -41,7 +41,7 @@ class TestTableOperations:
     def test_get_schema(self, db):
         pytest.importorskip("pyarrow")
         schema = db.schema("sensors")
-        field_names = [schema.field(i).name for i in range(schema.num_fields)]
+        field_names = [schema.field(i).name for i in range(len(schema))]
         assert "ts" in field_names
         assert "device" in field_names
         assert "value" in field_names
