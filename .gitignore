@@ -1,0 +1,34 @@
+# Rust
+/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+.venv/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.whl
+*.tar.gz
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/

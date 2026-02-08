@@ -1,0 +1,53 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "laminardb"
+version = "0.1.0"
+description = "Python bindings for LaminarDB streaming SQL database"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0", "pyarrow>=14.0"]
+polars = ["polars>=0.20"]
+pyarrow = ["pyarrow>=14.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
+    "hypothesis>=6.0",
+    "pyarrow>=14.0",
+    "pandas>=2.0",
+    "polars>=0.20",
+    "mypy>=1.10",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "laminardb._laminardb"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
