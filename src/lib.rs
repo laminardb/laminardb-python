@@ -10,11 +10,13 @@
 #![allow(deprecated)]
 
 mod async_support;
+mod catalog;
 mod config;
 mod connection;
 mod conversion;
 mod error;
 mod execute;
+mod metrics;
 mod query;
 mod subscription;
 mod writer;
@@ -39,6 +41,20 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<connection::QueryStreamIter>()?;
     m.add_class::<execute::ExecuteResult>()?;
     m.add_class::<config::PyLaminarConfig>()?;
+
+    // Catalog info classes
+    m.add_class::<catalog::PySourceInfo>()?;
+    m.add_class::<catalog::PySinkInfo>()?;
+    m.add_class::<catalog::PyStreamInfo>()?;
+    m.add_class::<catalog::PyQueryInfo>()?;
+
+    // Topology & metrics classes
+    m.add_class::<metrics::PyPipelineNode>()?;
+    m.add_class::<metrics::PyPipelineEdge>()?;
+    m.add_class::<metrics::PyPipelineTopology>()?;
+    m.add_class::<metrics::PyPipelineMetrics>()?;
+    m.add_class::<metrics::PySourceMetrics>()?;
+    m.add_class::<metrics::PyStreamMetrics>()?;
 
     // Exceptions
     error::register_exceptions(m)?;

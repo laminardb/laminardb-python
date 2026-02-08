@@ -3,7 +3,7 @@
 import pytest
 
 import laminardb
-from tests.conftest import requires_pandas, requires_polars, requires_pyarrow
+from conftest import requires_pandas, requires_polars, requires_pyarrow
 
 
 class TestDictIngestion:

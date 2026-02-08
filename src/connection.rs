@@ -12,9 +12,13 @@ use pyo3::prelude::*;
 use pyo3_arrow::PySchema;
 
 use crate::async_support::{AsyncSubscription, runtime};
+use crate::catalog::{PyQueryInfo, PySinkInfo, PySourceInfo, PyStreamInfo};
 use crate::conversion;
 use crate::error::{ConnectionError, IntoPyResult, QueryError};
 use crate::execute::ExecuteResult;
+use crate::metrics::{
+    PyPipelineMetrics, PyPipelineTopology, PySourceMetrics, PyStreamMetrics,
+};
 use crate::query::QueryResult;
 use crate::subscription::Subscription;
 use crate::writer::Writer;
@@ -291,6 +295,222 @@ impl PyConnection {
         })
     }
 
+    // ── Catalog info ──
+
+    /// List source info with schemas and watermark columns.
+    fn sources(&self, py: Python<'_>) -> PyResult<Vec<PySourceInfo>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.source_info().into_iter().map(PySourceInfo::from_core).collect())
+        })
+    }
+
+    /// List sink info.
+    fn sinks(&self, py: Python<'_>) -> PyResult<Vec<PySinkInfo>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.sink_info().into_iter().map(PySinkInfo::from_core).collect())
+        })
+    }
+
+    /// List stream info with SQL definitions.
+    fn streams(&self, py: Python<'_>) -> PyResult<Vec<PyStreamInfo>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.stream_info().into_iter().map(PyStreamInfo::from_core).collect())
+        })
+    }
+
+    /// List active and completed query info.
+    fn queries(&self, py: Python<'_>) -> PyResult<Vec<PyQueryInfo>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.query_info().into_iter().map(PyQueryInfo::from_core).collect())
+        })
+    }
+
+    // ── Pipeline topology & state ──
+
+    /// Get the pipeline topology graph.
+    fn topology(&self, py: Python<'_>) -> PyResult<PyPipelineTopology> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(PyPipelineTopology::from_core(conn.pipeline_topology()))
+        })
+    }
+
+    /// Get the pipeline state as a string.
+    #[getter]
+    fn pipeline_state(&self, py: Python<'_>) -> PyResult<String> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.pipeline_state())
+        })
+    }
+
+    /// Get the global pipeline watermark.
+    #[getter]
+    fn pipeline_watermark(&self, py: Python<'_>) -> PyResult<i64> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.pipeline_watermark())
+        })
+    }
+
+    /// Get total events processed across all sources.
+    #[getter]
+    fn total_events_processed(&self, py: Python<'_>) -> PyResult<u64> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.total_events_processed())
+        })
+    }
+
+    /// Get the number of registered sources.
+    #[getter]
+    fn source_count(&self, py: Python<'_>) -> PyResult<usize> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.source_count())
+        })
+    }
+
+    /// Get the number of registered sinks.
+    #[getter]
+    fn sink_count(&self, py: Python<'_>) -> PyResult<usize> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.sink_count())
+        })
+    }
+
+    /// Get the number of active queries.
+    #[getter]
+    fn active_query_count(&self, py: Python<'_>) -> PyResult<usize> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.active_query_count())
+        })
+    }
+
+    // ── Metrics ──
+
+    /// Get pipeline-wide metrics snapshot.
+    fn metrics(&self, py: Python<'_>) -> PyResult<PyPipelineMetrics> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(PyPipelineMetrics::from_core(conn.metrics()))
+        })
+    }
+
+    /// Get metrics for a specific source, or None if not found.
+    fn source_metrics(&self, py: Python<'_>, name: &str) -> PyResult<Option<PySourceMetrics>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let name = name.to_owned();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.source_metrics(&name).map(PySourceMetrics::from_core))
+        })
+    }
+
+    /// Get metrics for all sources.
+    fn all_source_metrics(&self, py: Python<'_>) -> PyResult<Vec<PySourceMetrics>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.all_source_metrics().into_iter().map(PySourceMetrics::from_core).collect())
+        })
+    }
+
+    /// Get metrics for a specific stream, or None if not found.
+    fn stream_metrics(&self, py: Python<'_>, name: &str) -> PyResult<Option<PyStreamMetrics>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let name = name.to_owned();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.stream_metrics(&name).map(PyStreamMetrics::from_core))
+        })
+    }
+
+    /// Get metrics for all streams.
+    fn all_stream_metrics(&self, py: Python<'_>) -> PyResult<Vec<PyStreamMetrics>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            Ok(conn.all_stream_metrics().into_iter().map(PyStreamMetrics::from_core).collect())
+        })
+    }
+
+    // ── Query control & shutdown ──
+
+    /// Cancel a running query by ID.
+    fn cancel_query(&self, py: Python<'_>, query_id: u64) -> PyResult<()> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.cancel_query(query_id).into_pyresult()
+        })
+    }
+
+    /// Gracefully shut down the streaming pipeline.
+    ///
+    /// Unlike `close()`, this waits for in-flight events to drain.
+    fn shutdown(&self, py: Python<'_>) -> PyResult<()> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.shutdown().into_pyresult()
+        })
+    }
+
     /// Execute a SQL statement (DDL, DML, or query).
     ///
     /// Returns an `ExecuteResult` that supports `int()` for backward-compatible
@@ -338,6 +558,22 @@ impl PyConnection {
     ) -> PyResult<bool> {
         self.close(py)?;
         Ok(false)
+    }
+
+    fn __aenter__(slf: Py<Self>, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        let obj: Py<PyAny> = slf.into_any();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(obj) })
+    }
+
+    fn __aexit__<'py>(
+        &mut self,
+        py: Python<'py>,
+        _exc_type: Option<&Bound<'py, PyAny>>,
+        _exc_val: Option<&Bound<'py, PyAny>>,
+        _exc_tb: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.close(py)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async { Ok(false) })
     }
 
     fn __repr__(&self) -> String {

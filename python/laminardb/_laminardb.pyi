@@ -152,9 +152,40 @@ class Connection:
     def is_checkpoint_enabled(self) -> bool:
         """Whether checkpointing is enabled for this connection."""
         ...
+    @property
+    def pipeline_state(self) -> str:
+        """Get the pipeline state as a string."""
+        ...
+    @property
+    def pipeline_watermark(self) -> int:
+        """Get the global pipeline watermark."""
+        ...
+    @property
+    def total_events_processed(self) -> int:
+        """Get total events processed across all sources."""
+        ...
+    @property
+    def source_count(self) -> int:
+        """Get the number of registered sources."""
+        ...
+    @property
+    def sink_count(self) -> int:
+        """Get the number of registered sinks."""
+        ...
+    @property
+    def active_query_count(self) -> int:
+        """Get the number of active queries."""
+        ...
 
     def __enter__(self) -> Connection: ...
     def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+    async def __aenter__(self) -> Connection: ...
+    async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
@@ -228,6 +259,60 @@ class Connection:
         Returns an ExecuteResult. Use int(result) for backward-compatible
         row count access.
         """
+        ...
+
+    # ── Catalog info ──
+
+    def sources(self) -> list[SourceInfo]:
+        """List source info with schemas and watermark columns."""
+        ...
+
+    def sinks(self) -> list[SinkInfo]:
+        """List sink info."""
+        ...
+
+    def streams(self) -> list[StreamInfo]:
+        """List stream info with SQL definitions."""
+        ...
+
+    def queries(self) -> list[QueryInfo]:
+        """List active and completed query info."""
+        ...
+
+    # ── Pipeline topology & metrics ──
+
+    def topology(self) -> PipelineTopology:
+        """Get the pipeline topology graph."""
+        ...
+
+    def metrics(self) -> PipelineMetrics:
+        """Get pipeline-wide metrics snapshot."""
+        ...
+
+    def source_metrics(self, name: str) -> SourceMetrics | None:
+        """Get metrics for a specific source, or None if not found."""
+        ...
+
+    def all_source_metrics(self) -> list[SourceMetrics]:
+        """Get metrics for all sources."""
+        ...
+
+    def stream_metrics(self, name: str) -> StreamMetrics | None:
+        """Get metrics for a specific stream, or None if not found."""
+        ...
+
+    def all_stream_metrics(self) -> list[StreamMetrics]:
+        """Get metrics for all streams."""
+        ...
+
+    # ── Query control & shutdown ──
+
+    def cancel_query(self, query_id: int) -> None:
+        """Cancel a running query by ID."""
+        ...
+
+    def shutdown(self) -> None:
+        """Gracefully shut down the streaming pipeline."""
         ...
 
     def close(self) -> None:
@@ -384,6 +469,172 @@ class AsyncSubscription:
     def cancel(self) -> None:
         """Cancel the subscription."""
         ...
+
+# ---------------------------------------------------------------------------
+# Catalog info
+# ---------------------------------------------------------------------------
+
+class SourceInfo:
+    """Information about a registered source."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def schema(self) -> Any:
+        """The source schema as a PyArrow Schema."""
+        ...
+    @property
+    def watermark_column(self) -> str | None: ...
+
+    def __repr__(self) -> str: ...
+
+class SinkInfo:
+    """Information about a registered sink."""
+
+    @property
+    def name(self) -> str: ...
+
+    def __repr__(self) -> str: ...
+
+class StreamInfo:
+    """Information about a registered stream."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def sql(self) -> str | None: ...
+
+    def __repr__(self) -> str: ...
+
+class QueryInfo:
+    """Information about a registered query."""
+
+    @property
+    def id(self) -> int: ...
+    @property
+    def sql(self) -> str: ...
+    @property
+    def active(self) -> bool: ...
+
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
+# Pipeline topology
+# ---------------------------------------------------------------------------
+
+class PipelineNode:
+    """A node in the pipeline topology graph."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def node_type(self) -> str:
+        """One of 'source', 'stream', or 'sink'."""
+        ...
+    @property
+    def schema(self) -> Any | None:
+        """The node schema as a PyArrow Schema, or None."""
+        ...
+    @property
+    def sql(self) -> str | None: ...
+
+    def __repr__(self) -> str: ...
+
+class PipelineEdge:
+    """An edge in the pipeline topology graph."""
+
+    @property
+    def from_node(self) -> str:
+        """Source node name."""
+        ...
+    @property
+    def to_node(self) -> str:
+        """Target node name."""
+        ...
+
+    def __repr__(self) -> str: ...
+
+class PipelineTopology:
+    """The pipeline topology: all nodes and edges."""
+
+    @property
+    def nodes(self) -> list[PipelineNode]: ...
+    @property
+    def edges(self) -> list[PipelineEdge]: ...
+
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
+# Pipeline metrics
+# ---------------------------------------------------------------------------
+
+class PipelineMetrics:
+    """Pipeline-wide metrics snapshot."""
+
+    @property
+    def total_events_ingested(self) -> int: ...
+    @property
+    def total_events_emitted(self) -> int: ...
+    @property
+    def total_events_dropped(self) -> int: ...
+    @property
+    def total_cycles(self) -> int: ...
+    @property
+    def total_batches(self) -> int: ...
+    @property
+    def uptime_secs(self) -> float: ...
+    @property
+    def state(self) -> str: ...
+    @property
+    def source_count(self) -> int: ...
+    @property
+    def stream_count(self) -> int: ...
+    @property
+    def sink_count(self) -> int: ...
+    @property
+    def pipeline_watermark(self) -> int: ...
+
+    def __repr__(self) -> str: ...
+
+class SourceMetrics:
+    """Metrics for a specific source."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def total_events(self) -> int: ...
+    @property
+    def pending(self) -> int: ...
+    @property
+    def capacity(self) -> int: ...
+    @property
+    def is_backpressured(self) -> bool: ...
+    @property
+    def watermark(self) -> int: ...
+    @property
+    def utilization(self) -> float: ...
+
+    def __repr__(self) -> str: ...
+
+class StreamMetrics:
+    """Metrics for a specific stream."""
+
+    @property
+    def name(self) -> str: ...
+    @property
+    def total_events(self) -> int: ...
+    @property
+    def pending(self) -> int: ...
+    @property
+    def capacity(self) -> int: ...
+    @property
+    def is_backpressured(self) -> bool: ...
+    @property
+    def watermark(self) -> int: ...
+    @property
+    def sql(self) -> str | None: ...
+
+    def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
 # Module-level functions

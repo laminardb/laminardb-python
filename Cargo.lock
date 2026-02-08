@@ -1928,7 +1928,6 @@ dependencies = [
 [[package]]
 name = "laminar-connectors"
 version = "0.1.0"
-source = "git+https://github.com/laminardb/laminardb.git#c536fd91833ad5adada3303c1e1168bb06d7fb17"
 dependencies = [
  "arrow-array",
  "arrow-cast",
@@ -1949,7 +1948,6 @@ dependencies = [
 [[package]]
 name = "laminar-core"
 version = "0.1.0"
-source = "git+https://github.com/laminardb/laminardb.git#c536fd91833ad5adada3303c1e1168bb06d7fb17"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -1985,7 +1983,6 @@ dependencies = [
 [[package]]
 name = "laminar-db"
 version = "0.1.0"
-source = "git+https://github.com/laminardb/laminardb.git#c536fd91833ad5adada3303c1e1168bb06d7fb17"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1995,9 +1992,11 @@ dependencies = [
  "async-trait",
  "datafusion",
  "datafusion-common",
+ "fxhash",
  "laminar-connectors",
  "laminar-core",
  "laminar-sql",
+ "laminar-storage",
  "parking_lot",
  "serde",
  "serde_json",
@@ -2011,7 +2010,6 @@ dependencies = [
 [[package]]
 name = "laminar-sql"
 version = "0.1.0"
-source = "git+https://github.com/laminardb/laminardb.git#c536fd91833ad5adada3303c1e1168bb06d7fb17"
 dependencies = [
  "anyhow",
  "arrow",
@@ -2034,10 +2032,10 @@ dependencies = [
 [[package]]
 name = "laminar-storage"
 version = "0.1.0"
-source = "git+https://github.com/laminardb/laminardb.git#c536fd91833ad5adada3303c1e1168bb06d7fb17"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "bytes",
  "crc32c",
  "fxhash",
