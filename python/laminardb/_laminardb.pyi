@@ -102,6 +102,10 @@ class Connection:
         """List all tables in the database."""
         ...
 
+    def execute(self, sql: str) -> int:
+        """Execute a SQL statement (DDL or DML). Returns rows affected."""
+        ...
+
     def close(self) -> None:
         """Close the connection."""
         ...
@@ -159,8 +163,8 @@ class QueryResult:
         """Convert to a Polars DataFrame."""
         ...
 
-    def to_dicts(self) -> list[dict[str, Any]]:
-        """Convert to a list of Python dicts."""
+    def to_dicts(self) -> dict[str, list[Any]]:
+        """Convert to a columnar dict mapping column names to value lists."""
         ...
 
     def to_df(self) -> Any:

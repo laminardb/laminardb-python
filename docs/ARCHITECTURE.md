@@ -9,10 +9,10 @@
 │  import laminardb                                    │
 │  db = laminardb.open("mydb")                         │
 │  db.insert("sensors", pandas_df)                     │
-│  result = db.query("SELECT * FROM sensors")          │
+│  result = db.query("SELECT 1 + 1 AS answer")        │
 │  df = result.to_pandas()                             │
 └──────────────────────┬──────────────────────────────┘
-                       │  Python C API (PyO3 0.28)
+                       │  Python C API (PyO3 0.27)
 ┌──────────────────────▼──────────────────────────────┐
 │              laminardb (Rust cdylib)                  │
 │                                                      │
@@ -33,7 +33,7 @@
 └──────────────────────┬──────────────────────────────┘
                        │  Rust crate API
 ┌──────────────────────▼──────────────────────────────┐
-│              laminardb-core (Rust)                    │
+│              laminar-db (Rust)                        │
 │          Streaming SQL database engine               │
 └─────────────────────────────────────────────────────┘
 ```
@@ -62,13 +62,13 @@ Python Object (dict, DataFrame, RecordBatch, JSON, CSV)
 Arrow RecordBatch[]
     │
     ▼ connection.rs: py.allow_threads()
-laminardb_core::Connection::insert()
+laminar_db::api::Connection::insert()
 ```
 
 ### Output (LaminarDB → Python)
 
 ```
-laminardb_core::QueryResult
+laminar_db::api::QueryResult
     │
     ▼ query.rs: QueryResult::from_core()
 Arrow RecordBatch[] + Schema
@@ -80,7 +80,7 @@ Python Object (PyArrow Table, Pandas DF, Polars DF, dicts)
 ## Thread Safety Model
 
 - All `#[pyclass]` types are `Send + Sync` for free-threaded Python (3.13t/3.14t)
-- `Connection` wraps `laminardb_core::Connection` in `Arc` for safe sharing
+- `Connection` wraps `laminar_db::api::Connection` in `Arc` for safe sharing
 - `Writer` uses `parking_lot::Mutex` for its internal buffer
 - `Subscription` uses `Arc<Mutex<...>>` + `AtomicBool` for state
 - ALL blocking Rust calls release the GIL via `py.allow_threads()`

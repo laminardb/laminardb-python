@@ -34,6 +34,7 @@
 | Non-blocking poll (`try_next`) | Implemented | `subscription.rs` |
 | Custom exception hierarchy | Implemented | `error.rs` |
 | PEP 561 type stubs | Implemented | `_laminardb.pyi` |
+| Raw SQL execution (`execute`) | Implemented | `connection.rs` |
 | Free-threaded Python support | Implemented | All modules |
 | GIL release on blocking ops | Implemented | All modules |
 | CI/CD pipeline | Implemented | `.github/workflows/` |
@@ -70,10 +71,17 @@
 ### Sync usage
 ```python
 with laminardb.open("mydb") as db:
+    # Create a source and insert data
+    db.create_table("sensors", {"ts": "int64", "value": "float64"})
     db.insert("sensors", {"ts": 1, "value": 42.0})
-    result = db.query("SELECT * FROM sensors")
+
+    # Query using inline SQL (sources and query tables are separate catalogs)
+    result = db.query("SELECT * FROM (VALUES (1, 42.0)) AS t(ts, value)")
     df = result.to_pandas()
 ```
+
+> **Note**: `open(path)` and `connect(uri)` currently open in-memory databases
+> (the path/URI parameters are accepted but unused in v0.1.0).
 
 ### Async subscription
 ```python

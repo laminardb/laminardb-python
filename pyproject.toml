@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "LaminarDB Contributors" }]
+keywords = ["database", "streaming", "sql", "arrow", "dataframe", "stream-processing"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,6 +26,13 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/laminardb/laminardb-python"
+Documentation = "https://github.com/laminardb/laminardb-python#readme"
+Repository = "https://github.com/laminardb/laminardb-python"
+Changelog = "https://github.com/laminardb/laminardb-python/blob/main/CHANGELOG.md"
+Issues = "https://github.com/laminardb/laminardb-python/issues"
 
 [project.optional-dependencies]
 pandas = ["pandas>=2.0", "pyarrow>=14.0"]

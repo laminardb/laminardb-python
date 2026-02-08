@@ -10,8 +10,32 @@ permissions:
   id-token: write  # OIDC trusted publishing
 
 jobs:
+  validate-version:
+    name: Validate version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract tag version
+        id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Check Cargo.toml version
+        run: |
+          cargo_version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$cargo_version" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "ERROR: Cargo.toml version ($cargo_version) does not match tag (${{ steps.tag.outputs.version }})"
+            exit 1
+          fi
+      - name: Check pyproject.toml version
+        run: |
+          pyproject_version=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ "$pyproject_version" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "ERROR: pyproject.toml version ($pyproject_version) does not match tag (${{ steps.tag.outputs.version }})"
+            exit 1
+          fi
+
   build-wheels:
     name: Build wheels (${{ matrix.os }})
+    needs: [validate-version]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,6 +69,7 @@ jobs:
 
   build-sdist:
     name: Build sdist
+    needs: [validate-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
