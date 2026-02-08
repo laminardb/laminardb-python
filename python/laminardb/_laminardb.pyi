@@ -20,6 +20,8 @@ DataInput = Union[
 
 class LaminarError(Exception):
     """Base exception for all LaminarDB errors."""
+    code: int
+    """Numeric error code (see laminardb.codes)."""
     ...
 
 class ConnectionError(LaminarError):
@@ -41,6 +43,99 @@ class SchemaError(LaminarError):
 class SubscriptionError(LaminarError):
     """Raised when a subscription operation fails."""
     ...
+
+# ---------------------------------------------------------------------------
+# Error codes
+# ---------------------------------------------------------------------------
+
+class codes:
+    """Error code constants for LaminarDB errors."""
+
+    # Connection (100-199)
+    CONNECTION_FAILED: int
+    CONNECTION_CLOSED: int
+    CONNECTION_IN_USE: int
+
+    # Schema (200-299)
+    TABLE_NOT_FOUND: int
+    TABLE_EXISTS: int
+    SCHEMA_MISMATCH: int
+    INVALID_SCHEMA: int
+
+    # Ingestion (300-399)
+    INGESTION_FAILED: int
+    WRITER_CLOSED: int
+    BATCH_SCHEMA_MISMATCH: int
+
+    # Query (400-499)
+    QUERY_FAILED: int
+    SQL_PARSE_ERROR: int
+    QUERY_CANCELLED: int
+
+    # Subscription (500-599)
+    SUBSCRIPTION_FAILED: int
+    SUBSCRIPTION_CLOSED: int
+    SUBSCRIPTION_TIMEOUT: int
+
+    # Internal (900-999)
+    INTERNAL_ERROR: int
+    SHUTDOWN: int
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+class LaminarConfig:
+    """Configuration for a LaminarDB connection."""
+
+    def __init__(
+        self,
+        *,
+        buffer_size: int = 65536,
+        storage_dir: str | None = None,
+        checkpoint_interval_ms: int | None = None,
+        table_spill_threshold: int = 1_000_000,
+    ) -> None: ...
+
+    @property
+    def buffer_size(self) -> int: ...
+    @property
+    def storage_dir(self) -> str | None: ...
+    @property
+    def checkpoint_interval_ms(self) -> int | None: ...
+    @property
+    def table_spill_threshold(self) -> int: ...
+
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
+# ExecuteResult
+# ---------------------------------------------------------------------------
+
+class ExecuteResult:
+    """The result of a SQL execute() call.
+
+    Supports int(result) for backward-compatible row count access.
+    """
+
+    @property
+    def result_type(self) -> str:
+        """One of 'ddl', 'rows_affected', 'query', or 'metadata'."""
+        ...
+    @property
+    def rows_affected(self) -> int: ...
+    @property
+    def ddl_type(self) -> str | None: ...
+    @property
+    def ddl_object(self) -> str | None: ...
+
+    def to_query_result(self) -> QueryResult | None:
+        """Convert to a QueryResult if this was a query or metadata result."""
+        ...
+
+    def __int__(self) -> int: ...
+    def __bool__(self) -> bool: ...
+    def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
 # Connection
@@ -127,8 +222,12 @@ class Connection:
         """Trigger a checkpoint. Returns the checkpoint ID or None."""
         ...
 
-    def execute(self, sql: str) -> int:
-        """Execute a SQL statement (DDL or DML). Returns rows affected."""
+    def execute(self, sql: str) -> ExecuteResult:
+        """Execute a SQL statement (DDL, DML, or query).
+
+        Returns an ExecuteResult. Use int(result) for backward-compatible
+        row count access.
+        """
         ...
 
     def close(self) -> None:
@@ -290,7 +389,7 @@ class AsyncSubscription:
 # Module-level functions
 # ---------------------------------------------------------------------------
 
-def open(path: str) -> Connection:
+def open(path: str, *, config: LaminarConfig | None = None) -> Connection:
     """Open a LaminarDB database at the given file path."""
     ...
 

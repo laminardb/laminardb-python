@@ -10,9 +10,11 @@
 #![allow(deprecated)]
 
 mod async_support;
+mod config;
 mod connection;
 mod conversion;
 mod error;
+mod execute;
 mod query;
 mod subscription;
 mod writer;
@@ -35,9 +37,14 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<subscription::Subscription>()?;
     m.add_class::<async_support::AsyncSubscription>()?;
     m.add_class::<connection::QueryStreamIter>()?;
+    m.add_class::<execute::ExecuteResult>()?;
+    m.add_class::<config::PyLaminarConfig>()?;
 
     // Exceptions
     error::register_exceptions(m)?;
+
+    // Error code constants submodule
+    register_codes(m)?;
 
     // Module-level functions
     m.add_function(wrap_pyfunction!(open, m)?)?;
@@ -46,15 +53,67 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
+/// Register the `codes` submodule with all error code constants.
+fn register_codes(parent: &Bound<'_, PyModule>) -> PyResult<()> {
+    use laminar_db::api::codes;
+    let py = parent.py();
+    let codes_module = PyModule::new(py, "codes")?;
+
+    // Connection (100-199)
+    codes_module.add("CONNECTION_FAILED", codes::CONNECTION_FAILED)?;
+    codes_module.add("CONNECTION_CLOSED", codes::CONNECTION_CLOSED)?;
+    codes_module.add("CONNECTION_IN_USE", codes::CONNECTION_IN_USE)?;
+
+    // Schema (200-299)
+    codes_module.add("TABLE_NOT_FOUND", codes::TABLE_NOT_FOUND)?;
+    codes_module.add("TABLE_EXISTS", codes::TABLE_EXISTS)?;
+    codes_module.add("SCHEMA_MISMATCH", codes::SCHEMA_MISMATCH)?;
+    codes_module.add("INVALID_SCHEMA", codes::INVALID_SCHEMA)?;
+
+    // Ingestion (300-399)
+    codes_module.add("INGESTION_FAILED", codes::INGESTION_FAILED)?;
+    codes_module.add("WRITER_CLOSED", codes::WRITER_CLOSED)?;
+    codes_module.add("BATCH_SCHEMA_MISMATCH", codes::BATCH_SCHEMA_MISMATCH)?;
+
+    // Query (400-499)
+    codes_module.add("QUERY_FAILED", codes::QUERY_FAILED)?;
+    codes_module.add("SQL_PARSE_ERROR", codes::SQL_PARSE_ERROR)?;
+    codes_module.add("QUERY_CANCELLED", codes::QUERY_CANCELLED)?;
+
+    // Subscription (500-599)
+    codes_module.add("SUBSCRIPTION_FAILED", codes::SUBSCRIPTION_FAILED)?;
+    codes_module.add("SUBSCRIPTION_CLOSED", codes::SUBSCRIPTION_CLOSED)?;
+    codes_module.add("SUBSCRIPTION_TIMEOUT", codes::SUBSCRIPTION_TIMEOUT)?;
+
+    // Internal (900-999)
+    codes_module.add("INTERNAL_ERROR", codes::INTERNAL_ERROR)?;
+    codes_module.add("SHUTDOWN", codes::SHUTDOWN)?;
+
+    parent.add_submodule(&codes_module)?;
+    Ok(())
+}
+
 /// Open a LaminarDB database at the given file path.
 ///
 /// Example:
 ///     db = laminardb.open("my_database")
+///     db = laminardb.open("mydb", config=laminardb.LaminarConfig(buffer_size=1024))
 #[pyfunction]
-fn open(py: Python<'_>, _path: &str) -> PyResult<PyConnection> {
+#[pyo3(signature = (path, *, config=None))]
+fn open(
+    py: Python<'_>,
+    path: &str,
+    config: Option<&config::PyLaminarConfig>,
+) -> PyResult<PyConnection> {
+    let _ = path; // path unused until file-based persistence is wired
     py.allow_threads(|| {
         let _rt = async_support::runtime().enter();
-        let conn = laminar_db::api::Connection::open().into_pyresult()?;
+        let conn = match config {
+            Some(cfg) => {
+                laminar_db::api::Connection::open_with_config(cfg.to_core()).into_pyresult()?
+            }
+            None => laminar_db::api::Connection::open().into_pyresult()?,
+        };
         Ok(PyConnection::from_core(conn))
     })
 }

@@ -109,6 +109,21 @@ impl QueryResult {
         Self { batches, schema }
     }
 
+    /// Total row count across all batches.
+    pub fn row_count(&self) -> usize {
+        self.batches.iter().map(|b| b.num_rows()).sum()
+    }
+
+    /// Read-only access to the batches (for cloning in ExecuteResult).
+    pub fn batches_ref(&self) -> &[RecordBatch] {
+        &self.batches
+    }
+
+    /// Read-only access to the schema.
+    pub fn schema_ref(&self) -> &SchemaRef {
+        &self.schema
+    }
+
     /// Create from a core query result.
     pub fn from_core(result: laminar_db::api::QueryResult) -> Self {
         let schema = result.schema();

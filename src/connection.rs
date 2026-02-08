@@ -14,6 +14,7 @@ use pyo3_arrow::PySchema;
 use crate::async_support::{AsyncSubscription, runtime};
 use crate::conversion;
 use crate::error::{ConnectionError, IntoPyResult, QueryError};
+use crate::execute::ExecuteResult;
 use crate::query::QueryResult;
 use crate::subscription::Subscription;
 use crate::writer::Writer;
@@ -290,8 +291,12 @@ impl PyConnection {
         })
     }
 
-    /// Execute a SQL statement (DDL or DML). Returns rows affected for DML, 0 for DDL.
-    fn execute(&self, py: Python<'_>, sql: &str) -> PyResult<u64> {
+    /// Execute a SQL statement (DDL, DML, or query).
+    ///
+    /// Returns an `ExecuteResult` that supports `int()` for backward-compatible
+    /// row count access, plus `.result_type`, `.ddl_type`, `.ddl_object`, and
+    /// `.to_query_result()` for richer introspection.
+    fn execute(&self, py: Python<'_>, sql: &str) -> PyResult<ExecuteResult> {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
@@ -299,10 +304,7 @@ impl PyConnection {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let result = conn.execute(&sql).into_pyresult()?;
-            match result {
-                laminar_db::api::ExecuteResult::RowsAffected(n) => Ok(n),
-                _ => Ok(0),
-            }
+            Ok(ExecuteResult::from_core(result))
         })
     }
 

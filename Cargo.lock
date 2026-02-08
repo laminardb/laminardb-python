@@ -2063,6 +2063,7 @@ dependencies = [
  "arrow-csv",
  "arrow-json",
  "arrow-schema",
+ "laminar-core",
  "laminar-db",
  "parking_lot",
  "pyo3",
