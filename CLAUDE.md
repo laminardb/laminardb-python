@@ -8,13 +8,14 @@ Python bindings for the LaminarDB streaming SQL database, built with PyO3 and ma
 
 | Dependency | Version | Notes |
 |---|---|---|
-| PyO3 | 0.28 | `extension-module`, `abi3-py310`, `anyhow` features |
-| pyo3-async-runtimes | 0.28 | `tokio-runtime` feature |
-| pyo3-arrow | 0.12 | Arrow ↔ PyArrow conversion |
-| arrow-rs | 57 | `pyarrow`, `ffi` features |
+| PyO3 | 0.27 | `extension-module`, `abi3-py311`, `anyhow` features |
+| pyo3-async-runtimes | 0.27 | `tokio-runtime` feature |
+| pyo3-arrow | 0.15 | Arrow ↔ PyArrow conversion (zero-copy PyCapsule) |
+| arrow-rs | 57 | `ffi` feature |
+| laminar-db | git | `api` feature, from laminardb monorepo |
 | maturin | >=1.7,<2.0 | Build system |
-| Rust edition | 2024 | Minimum Rust 1.83 |
-| Python | >=3.10 | abi3 stable ABI |
+| Rust edition | 2024 | Minimum Rust 1.85 |
+| Python | >=3.11 | abi3 stable ABI |
 | pytest-asyncio | >=1.0 | `asyncio_mode = "auto"` |
 | License | MIT | PEP 639 SPDX string |
 

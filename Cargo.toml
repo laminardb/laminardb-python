@@ -2,7 +2,7 @@
 name = "laminardb"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.83"
+rust-version = "1.85"
 license = "MIT"
 description = "Python bindings for LaminarDB streaming SQL database"
 publish = false
@@ -12,17 +12,17 @@ name = "_laminardb"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310", "anyhow"] }
-pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
-pyo3-arrow = "0.12"
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311", "anyhow"] }
+pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
+pyo3-arrow = "0.15"
 
-arrow = { version = "57", features = ["pyarrow", "ffi"] }
+arrow = { version = "57", features = ["ffi"] }
 arrow-array = "57"
 arrow-schema = "57"
 arrow-json = "57"
 arrow-csv = "57"
 
-laminardb-core = { git = "https://github.com/laminardb/laminardb-core.git" }
+laminar-db = { git = "https://github.com/laminardb/laminardb.git", package = "laminar-db", features = ["api"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 parking_lot = "0.12"

@@ -1,16 +1,12 @@
 //! Async support: Tokio runtime management and async Python classes.
-//!
-//! Provides:
-//! - Lazy-initialized global Tokio runtime
-//! - `AsyncSubscription` class for async iteration
 
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use parking_lot::Mutex;
 use pyo3::exceptions::PyStopAsyncIteration;
 use pyo3::prelude::*;
 
-use crate::error::{IntoPyResult, SubscriptionError};
+use crate::error::IntoPyResult;
 use crate::query::QueryResult;
 
 // ---------------------------------------------------------------------------
@@ -35,13 +31,9 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
 // ---------------------------------------------------------------------------
 
 /// An asynchronous subscription to a continuous query.
-///
-///     async for result in await conn.subscribe_async("SELECT ..."):
-///         df = result.to_pandas()
 #[pyclass(name = "AsyncSubscription")]
 pub struct AsyncSubscription {
-    inner: Arc<Mutex<laminardb_core::Subscription>>,
-    active: Arc<std::sync::atomic::AtomicBool>,
+    inner: Mutex<Option<laminar_db::api::QueryStream>>,
 }
 
 unsafe impl Send for AsyncSubscription {}
@@ -52,17 +44,16 @@ impl AsyncSubscription {
     /// Whether the subscription is still active.
     #[getter]
     fn is_active(&self) -> bool {
-        self.active.load(std::sync::atomic::Ordering::Relaxed)
+        let guard = self.inner.lock();
+        guard.as_ref().is_some_and(|s| s.is_active())
     }
 
     /// Cancel the subscription.
-    fn cancel<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let inner = self.inner.clone();
-        let active = self.active.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            if active.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                let sub = inner.lock();
-                sub.cancel().await.into_pyresult()?;
+    fn cancel(&self, py: Python<'_>) -> PyResult<()> {
+        py.allow_threads(|| {
+            let mut guard = self.inner.lock();
+            if let Some(stream) = guard.as_mut() {
+                stream.cancel();
             }
             Ok(())
         })
@@ -77,20 +68,28 @@ impl AsyncSubscription {
             return Err(PyStopAsyncIteration::new_err(()));
         }
 
-        let inner = self.inner.clone();
-        let active = self.active.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let result = {
-                let mut sub = inner.lock();
-                sub.next().await
-            };
+        // For async iteration we still use allow_threads + future_into_py
+        // since QueryStream.next() is a blocking call
+        let is_active = self.is_active();
+        if !is_active {
+            return Err(PyStopAsyncIteration::new_err(()));
+        }
 
-            match result {
-                Some(Ok(result)) => Ok(QueryResult::from_core(result)),
-                Some(Err(e)) => Err(SubscriptionError::new_err(e.to_string())),
-                None => {
-                    active.store(false, std::sync::atomic::Ordering::Relaxed);
-                    Err(PyStopAsyncIteration::new_err(()))
+        // We need to move the check into the future
+        // Use a simple wrapper that polls in the tokio runtime
+        pyo3_async_runtimes::tokio::future_into_py(py, {
+            // Can't move Mutex guard into async, so we do blocking poll
+            let result = {
+                let mut guard = self.inner.lock();
+                match guard.as_mut() {
+                    Some(stream) => stream.next().into_pyresult(),
+                    None => Ok(None),
+                }
+            };
+            async move {
+                match result? {
+                    Some(batch) => Ok(QueryResult::from_batch(batch)),
+                    None => Err(PyStopAsyncIteration::new_err(())),
                 }
             }
         })
@@ -98,10 +97,9 @@ impl AsyncSubscription {
 }
 
 impl AsyncSubscription {
-    pub fn from_core(sub: laminardb_core::Subscription) -> Self {
+    pub fn from_core(stream: laminar_db::api::QueryStream) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(sub)),
-            active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            inner: Mutex::new(Some(stream)),
         }
     }
 }

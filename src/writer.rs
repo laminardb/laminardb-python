@@ -6,9 +6,6 @@
 //!         w.insert({"ts": 2, "value": 43.0})
 //!     # auto-flushed on exit
 
-use std::sync::Arc;
-
-use arrow_array::RecordBatch;
 use parking_lot::Mutex;
 use pyo3::prelude::*;
 
@@ -18,67 +15,59 @@ use crate::error::{IngestionError, IntoPyResult};
 /// A streaming writer for batched inserts into a table.
 #[pyclass(name = "Writer")]
 pub struct Writer {
-    conn: Arc<laminardb_core::Connection>,
-    table: String,
-    buffer: Mutex<Vec<RecordBatch>>,
-    closed: bool,
+    inner: Mutex<Option<laminar_db::api::Writer>>,
 }
 
-// Safety: all fields are Send + Sync
 unsafe impl Send for Writer {}
 unsafe impl Sync for Writer {}
 
 #[pymethods]
 impl Writer {
-    /// Add data to the write buffer.
+    /// Add data to the writer (writes through immediately).
     fn insert(&self, py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
         self.check_closed()?;
         let batches = conversion::python_to_batches(py, data, None)?;
-        let mut buf = self.buffer.lock();
-        buf.extend(batches);
-        Ok(())
+        py.allow_threads(|| {
+            let mut guard = self.inner.lock();
+            let writer = guard.as_mut().unwrap();
+            for batch in batches {
+                writer.write(batch).into_pyresult()?;
+            }
+            Ok(())
+        })
     }
 
-    /// Flush the buffer to the database. Returns the number of rows written.
+    /// Flush the writer buffer. Returns 0 (flush has no row count).
     fn flush(&self, py: Python<'_>) -> PyResult<u64> {
         self.check_closed()?;
-        let batches: Vec<RecordBatch> = {
-            let mut buf = self.buffer.lock();
-            std::mem::take(&mut *buf)
-        };
-
-        if batches.is_empty() {
-            return Ok(0);
-        }
-
-        let conn = self.conn.clone();
-        let table = self.table.clone();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            let mut total = 0u64;
-            for batch in &batches {
-                total += rt.block_on(conn.insert(&table, batch)).into_pyresult()?;
-            }
-            Ok(total)
+            let mut guard = self.inner.lock();
+            let writer = guard.as_mut().unwrap();
+            writer.flush().into_pyresult()?;
+            Ok(0)
         })
     }
 
     /// Flush remaining data and close the writer.
-    fn close(&mut self, py: Python<'_>) -> PyResult<()> {
-        if !self.closed {
-            self.flush(py)?;
-            self.closed = true;
+    fn close(&self, py: Python<'_>) -> PyResult<()> {
+        let writer = {
+            let mut guard = self.inner.lock();
+            guard.take()
+        };
+        if let Some(w) = writer {
+            py.allow_threads(|| {
+                w.close().into_pyresult()
+            })?;
         }
         Ok(())
     }
 
-    // Context manager support
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
 
     fn __exit__(
-        &mut self,
+        &self,
         py: Python<'_>,
         _exc_type: Option<&Bound<'_, PyAny>>,
         _exc_val: Option<&Bound<'_, PyAny>>,
@@ -90,17 +79,15 @@ impl Writer {
 }
 
 impl Writer {
-    pub fn new(conn: Arc<laminardb_core::Connection>, table: String) -> Self {
+    pub fn from_core(writer: laminar_db::api::Writer) -> Self {
         Self {
-            conn,
-            table,
-            buffer: Mutex::new(Vec::new()),
-            closed: false,
+            inner: Mutex::new(Some(writer)),
         }
     }
 
     fn check_closed(&self) -> PyResult<()> {
-        if self.closed {
+        let guard = self.inner.lock();
+        if guard.is_none() {
             Err(IngestionError::new_err("Writer is closed"))
         } else {
             Ok(())

@@ -1,4 +1,4 @@
-//! Error hierarchy mapping LaminarDB core errors to Python exceptions.
+//! Error hierarchy mapping LaminarDB API errors to Python exceptions.
 //!
 //! Exception hierarchy:
 //!   LaminarError (base)
@@ -27,25 +27,27 @@ create_exception!(laminardb, SubscriptionError, LaminarError, "Raised when a sub
 // Core error → Python exception mapping
 // ---------------------------------------------------------------------------
 
-/// Map a `laminardb_core::ApiError` to the appropriate Python exception.
-pub fn core_error_to_pyerr(err: laminardb_core::ApiError) -> PyErr {
-    use laminardb_core::ApiError;
-    match &err {
-        ApiError::Connection(_) => ConnectionError::new_err(err.to_string()),
-        ApiError::Query(_) => QueryError::new_err(err.to_string()),
-        ApiError::Ingestion(_) => IngestionError::new_err(err.to_string()),
-        ApiError::Schema(_) => SchemaError::new_err(err.to_string()),
-        ApiError::Subscription(_) => SubscriptionError::new_err(err.to_string()),
-        _ => LaminarError::new_err(err.to_string()),
+/// Map a `laminar_db::api::ApiError` to the appropriate Python exception.
+pub fn core_error_to_pyerr(err: laminar_db::api::ApiError) -> PyErr {
+    use laminar_db::api::codes;
+    let code = err.code();
+    let msg = err.to_string();
+    match code {
+        codes::CONNECTION_FAILED | codes::CONNECTION_CLOSED => ConnectionError::new_err(msg),
+        codes::TABLE_NOT_FOUND | codes::TABLE_EXISTS | codes::SCHEMA_MISMATCH => SchemaError::new_err(msg),
+        codes::INGESTION_FAILED | codes::WRITER_CLOSED => IngestionError::new_err(msg),
+        codes::QUERY_FAILED | codes::SQL_PARSE_ERROR => QueryError::new_err(msg),
+        codes::SUBSCRIPTION_FAILED | codes::SUBSCRIPTION_CLOSED | codes::SUBSCRIPTION_TIMEOUT => SubscriptionError::new_err(msg),
+        _ => LaminarError::new_err(msg),
     }
 }
 
-/// Convenience trait to convert `Result<T, laminardb_core::ApiError>` to `PyResult<T>`.
+/// Convenience trait to convert `Result<T, laminar_db::api::ApiError>` to `PyResult<T>`.
 pub trait IntoPyResult<T> {
     fn into_pyresult(self) -> PyResult<T>;
 }
 
-impl<T> IntoPyResult<T> for Result<T, laminardb_core::ApiError> {
+impl<T> IntoPyResult<T> for Result<T, laminar_db::api::ApiError> {
     fn into_pyresult(self) -> PyResult<T> {
         self.map_err(core_error_to_pyerr)
     }

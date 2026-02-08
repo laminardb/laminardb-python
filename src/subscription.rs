@@ -1,24 +1,18 @@
 //! Synchronous `Subscription` class for continuous queries.
 //!
-//! Usage:
-//!     sub = conn.subscribe("SELECT * FROM sensors WHERE value > 100")
-//!     for result in sub:
-//!         print(result.to_pandas())
-
-use std::sync::Arc;
+//! Wraps `laminar_db::api::QueryStream` as a Python iterator.
 
 use parking_lot::Mutex;
 use pyo3::exceptions::PyStopIteration;
 use pyo3::prelude::*;
 
-use crate::error::{IntoPyResult, SubscriptionError};
+use crate::error::IntoPyResult;
 use crate::query::QueryResult;
 
 /// A synchronous subscription to a continuous query.
 #[pyclass(name = "Subscription")]
 pub struct Subscription {
-    inner: Arc<Mutex<laminardb_core::Subscription>>,
-    active: Arc<std::sync::atomic::AtomicBool>,
+    inner: Mutex<Option<laminar_db::api::QueryStream>>,
 }
 
 unsafe impl Send for Subscription {}
@@ -29,36 +23,35 @@ impl Subscription {
     /// Whether the subscription is still active.
     #[getter]
     fn is_active(&self) -> bool {
-        self.active.load(std::sync::atomic::Ordering::Relaxed)
+        let guard = self.inner.lock();
+        guard.as_ref().is_some_and(|s| s.is_active())
     }
 
     /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
-        if self.active.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            let inner = self.inner.clone();
-            py.allow_threads(|| {
-                let rt = crate::async_support::runtime();
-                let sub = inner.lock();
-                rt.block_on(sub.cancel()).into_pyresult()
-            })?;
-        }
-        Ok(())
+        py.allow_threads(|| {
+            let mut guard = self.inner.lock();
+            if let Some(stream) = guard.as_mut() {
+                stream.cancel();
+            }
+            Ok(())
+        })
     }
 
     /// Non-blocking poll for the next result.
     fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        if !self.is_active() {
+        let guard = self.inner.lock();
+        if guard.is_none() {
             return Ok(None);
         }
+        drop(guard);
 
-        let inner = self.inner.clone();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            let mut sub = inner.lock();
-            match rt.block_on(sub.try_next()) {
-                Ok(Some(result)) => Ok(Some(QueryResult::from_core(result))),
-                Ok(None) => Ok(None),
-                Err(e) => Err(SubscriptionError::new_err(e.to_string())),
+            let mut guard = self.inner.lock();
+            let stream = guard.as_mut().unwrap();
+            match stream.try_next().into_pyresult()? {
+                Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+                None => Ok(None),
             }
         })
     }
@@ -67,34 +60,30 @@ impl Subscription {
         slf
     }
 
-    fn __next__(&mut self, py: Python<'_>) -> PyResult<QueryResult> {
-        if !self.is_active() {
+    fn __next__(&self, py: Python<'_>) -> PyResult<QueryResult> {
+        let guard = self.inner.lock();
+        if guard.as_ref().is_none_or(|s| !s.is_active()) {
             return Err(PyStopIteration::new_err(()));
         }
+        drop(guard);
 
-        let inner = self.inner.clone();
         let result = py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            let mut sub = inner.lock();
-            rt.block_on(sub.next())
-        });
+            let mut guard = self.inner.lock();
+            let stream = guard.as_mut().unwrap();
+            stream.next().into_pyresult()
+        })?;
 
         match result {
-            Some(Ok(result)) => Ok(QueryResult::from_core(result)),
-            Some(Err(e)) => Err(SubscriptionError::new_err(e.to_string())),
-            None => {
-                self.active.store(false, std::sync::atomic::Ordering::Relaxed);
-                Err(PyStopIteration::new_err(()))
-            }
+            Some(batch) => Ok(QueryResult::from_batch(batch)),
+            None => Err(PyStopIteration::new_err(())),
         }
     }
 }
 
 impl Subscription {
-    pub fn from_core(sub: laminardb_core::Subscription) -> Self {
+    pub fn from_core(stream: laminar_db::api::QueryStream) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(sub)),
-            active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            inner: Mutex::new(Some(stream)),
         }
     }
 }

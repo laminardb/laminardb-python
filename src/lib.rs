@@ -1,6 +1,6 @@
 //! LaminarDB Python bindings — streaming SQL database.
 //!
-//! This crate provides Python bindings for `laminardb-core` using PyO3 0.28.
+//! This crate provides Python bindings for `laminar-db` using PyO3 0.27.
 //! It exposes a high-level API for connecting to databases, inserting data
 //! in multiple formats, querying with SQL, and subscribing to continuous queries.
 
@@ -18,9 +18,6 @@ use connection::PyConnection;
 use error::IntoPyResult;
 
 /// The native extension module for laminardb.
-///
-/// This module is re-exported by `laminardb.__init__` and should not be
-/// imported directly.
 #[pymodule]
 fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Version
@@ -32,7 +29,7 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<query::QueryResult>()?;
     m.add_class::<subscription::Subscription>()?;
     m.add_class::<async_support::AsyncSubscription>()?;
-    m.add_class::<connection::QueryResultIter>()?;
+    m.add_class::<connection::QueryStreamIter>()?;
 
     // Exceptions
     error::register_exceptions(m)?;
@@ -49,11 +46,9 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Example:
 ///     db = laminardb.open("my_database")
 #[pyfunction]
-fn open(py: Python<'_>, path: &str) -> PyResult<PyConnection> {
-    let path = path.to_owned();
+fn open(py: Python<'_>, _path: &str) -> PyResult<PyConnection> {
     py.allow_threads(|| {
-        let rt = async_support::runtime();
-        let conn = rt.block_on(laminardb_core::Connection::open(&path)).into_pyresult()?;
+        let conn = laminar_db::api::Connection::open().into_pyresult()?;
         Ok(PyConnection::from_core(conn))
     })
 }
@@ -63,11 +58,10 @@ fn open(py: Python<'_>, path: &str) -> PyResult<PyConnection> {
 /// Example:
 ///     db = laminardb.connect("laminar://localhost:5432/mydb")
 #[pyfunction]
-fn connect(py: Python<'_>, uri: &str) -> PyResult<PyConnection> {
-    let uri = uri.to_owned();
+fn connect(py: Python<'_>, _uri: &str) -> PyResult<PyConnection> {
     py.allow_threads(|| {
-        let rt = async_support::runtime();
-        let conn = rt.block_on(laminardb_core::Connection::connect(&uri)).into_pyresult()?;
+        // Connection::open() is the entry point; config can set storage path
+        let conn = laminar_db::api::Connection::open().into_pyresult()?;
         Ok(PyConnection::from_core(conn))
     })
 }

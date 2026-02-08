@@ -1,18 +1,7 @@
 //! `QueryResult` class providing zero-copy exports to multiple formats.
-//!
-//! Export priority:
-//!   1. `to_arrow()` — PyArrow Table (zero-copy via PyCapsule)
-//!   2. `to_pandas()` — Pandas DataFrame (via pyarrow bridge)
-//!   3. `to_polars()` — Polars DataFrame
-//!   4. `to_dicts()` — list of Python dicts
-//!   5. `to_df()` — auto-detect best library
-//!
-//! Also implements `__arrow_c_stream__` for direct PyCapsule export.
-
-use std::sync::Arc;
 
 use arrow_array::RecordBatch;
-use arrow_schema::Schema;
+use arrow_schema::SchemaRef;
 use pyo3::prelude::*;
 
 use crate::conversion;
@@ -21,10 +10,9 @@ use crate::conversion;
 #[pyclass(name = "QueryResult")]
 pub struct QueryResult {
     batches: Vec<RecordBatch>,
-    schema: Arc<Schema>,
+    schema: SchemaRef,
 }
 
-// RecordBatch and Schema are Send + Sync
 unsafe impl Send for QueryResult {}
 unsafe impl Sync for QueryResult {}
 
@@ -81,11 +69,14 @@ impl QueryResult {
     fn __arrow_c_stream__<'py>(
         &self,
         py: Python<'py>,
-        _requested_schema: Option<&Bound<'py, PyAny>>,
+        requested_schema: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        // Build a PyArrow table and delegate to its __arrow_c_stream__
+        // Export via PyArrow table's __arrow_c_stream__
         let table = self.to_arrow(py)?;
-        table.call_method1("__arrow_c_stream__", (_requested_schema,))
+        match requested_schema {
+            Some(schema) => table.call_method1("__arrow_c_stream__", (schema,)),
+            None => table.call_method0("__arrow_c_stream__"),
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -99,12 +90,18 @@ impl QueryResult {
 
 impl QueryResult {
     /// Create from a core query result.
-    pub fn from_core(result: laminardb_core::QueryResult) -> Self {
-        let schema = result.schema().clone();
+    pub fn from_core(result: laminar_db::api::QueryResult) -> Self {
+        let schema = result.schema();
         let batches = result.into_batches();
+        Self { batches, schema }
+    }
+
+    /// Create from a single RecordBatch (used by stream iterator).
+    pub fn from_batch(batch: RecordBatch) -> Self {
+        let schema = batch.schema();
         Self {
-            batches,
-            schema: Arc::new(schema),
+            batches: vec![batch],
+            schema,
         }
     }
 }

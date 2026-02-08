@@ -1,12 +1,13 @@
-//! Python `Connection` class wrapping `laminardb_core::Connection`.
+//! Python `Connection` class wrapping `laminar_db::api::Connection`.
 //!
 //! All blocking operations release the GIL via `py.allow_threads()`.
-//! The inner connection is `Arc`-wrapped for safe sharing across threads.
 
 use std::sync::Arc;
 
+use arrow_schema::SchemaRef;
+use parking_lot::Mutex;
 use pyo3::prelude::*;
-use pyo3::types::PyString;
+use pyo3_arrow::PySchema;
 
 use crate::conversion;
 use crate::error::{ConnectionError, IntoPyResult};
@@ -19,173 +20,197 @@ use crate::writer::Writer;
 ///
 /// Use as a context manager for automatic cleanup:
 ///
-///     with laminardb.open("mydb") as conn:
+///     with laminardb.open(":memory:") as conn:
 ///         conn.insert("sensors", {"ts": 1, "value": 42.0})
 #[pyclass(name = "Connection")]
 pub struct PyConnection {
-    inner: Arc<laminardb_core::Connection>,
+    inner: Arc<Mutex<laminar_db::api::Connection>>,
     closed: bool,
 }
 
-// Safety: laminardb_core::Connection is Send + Sync
+// Safety: inner is Arc<Mutex<..>>, closed is only mutated with &mut self
 unsafe impl Send for PyConnection {}
 unsafe impl Sync for PyConnection {}
 
 #[pymethods]
 impl PyConnection {
-    /// Insert data into a table. Returns the number of rows inserted.
-    ///
-    /// Accepts: dict, list[dict], dict of lists, PyArrow RecordBatch/Table,
-    /// Pandas DataFrame, or Polars DataFrame.
+    /// Insert data into a source. Returns the number of rows inserted.
     fn insert(&self, py: Python<'_>, table: &str, data: &Bound<'_, PyAny>) -> PyResult<u64> {
         self.check_closed()?;
         let batches = conversion::python_to_batches(py, data, None)?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         let table = table.to_owned();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
+            let conn = inner.lock();
             let mut total = 0u64;
             for batch in &batches {
-                total += rt.block_on(conn.insert(&table, batch)).into_pyresult()?;
+                total += conn.insert(&table, batch.clone()).into_pyresult()?;
             }
             Ok(total)
         })
     }
 
-    /// Insert JSON string data into a table.
+    /// Insert JSON string data into a source.
     fn insert_json(&self, py: Python<'_>, table: &str, data: &str) -> PyResult<u64> {
         self.check_closed()?;
-        let batches = conversion::json_str_to_batches(data, None)?;
-        let conn = self.inner.clone();
+        let batches = conversion::json_str_to_batches(data)?;
+        let inner = self.inner.clone();
         let table = table.to_owned();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
+            let conn = inner.lock();
             let mut total = 0u64;
             for batch in &batches {
-                total += rt.block_on(conn.insert(&table, batch)).into_pyresult()?;
+                total += conn.insert(&table, batch.clone()).into_pyresult()?;
             }
             Ok(total)
         })
     }
 
-    /// Insert CSV string data into a table.
+    /// Insert CSV string data into a source.
     fn insert_csv(&self, py: Python<'_>, table: &str, data: &str) -> PyResult<u64> {
         self.check_closed()?;
-        let batches = conversion::csv_str_to_batches(data, None)?;
-        let conn = self.inner.clone();
+        let batches = conversion::csv_str_to_batches(data)?;
+        let inner = self.inner.clone();
         let table = table.to_owned();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
+            let conn = inner.lock();
             let mut total = 0u64;
             for batch in &batches {
-                total += rt.block_on(conn.insert(&table, batch)).into_pyresult()?;
+                total += conn.insert(&table, batch.clone()).into_pyresult()?;
             }
             Ok(total)
         })
     }
 
     /// Create a streaming writer for batched inserts.
-    fn writer(&self, table: &str) -> PyResult<Writer> {
+    fn writer(&self, py: Python<'_>, table: &str) -> PyResult<Writer> {
         self.check_closed()?;
-        Ok(Writer::new(self.inner.clone(), table.to_owned()))
+        let inner = self.inner.clone();
+        let table = table.to_owned();
+        let writer = py.allow_threads(|| {
+            let conn = inner.lock();
+            conn.writer(&table).into_pyresult()
+        })?;
+        Ok(Writer::from_core(writer))
     }
 
     /// Execute a SQL query and return the full result.
     fn query(&self, py: Python<'_>, sql: &str) -> PyResult<QueryResult> {
         self.check_closed()?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         let sql = sql.to_owned();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            let result = rt.block_on(conn.query(&sql)).into_pyresult()?;
+            let conn = inner.lock();
+            let result = conn.query(&sql).into_pyresult()?;
             Ok(QueryResult::from_core(result))
         })
     }
 
     /// Execute a SQL query and stream results in batches.
-    fn stream(&self, py: Python<'_>, sql: &str) -> PyResult<QueryResultIter> {
+    fn stream(&self, py: Python<'_>, sql: &str) -> PyResult<QueryStreamIter> {
         self.check_closed()?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         let sql = sql.to_owned();
         let stream = py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            rt.block_on(conn.stream(&sql)).into_pyresult()
+            let conn = inner.lock();
+            conn.query_stream(&sql).into_pyresult()
         })?;
-        Ok(QueryResultIter { inner: stream })
+        Ok(QueryStreamIter { inner: Mutex::new(stream) })
     }
 
     /// Subscribe to a continuous query (sync iterator).
     fn subscribe(&self, py: Python<'_>, sql: &str) -> PyResult<Subscription> {
         self.check_closed()?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         let sql = sql.to_owned();
-        let sub = py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            rt.block_on(conn.subscribe(&sql)).into_pyresult()
+        let _exec = py.allow_threads(|| {
+            let conn = inner.lock();
+            conn.execute(&sql).into_pyresult()
         })?;
-        Ok(Subscription::from_core(sub))
+        // For subscriptions, we query_stream and wrap it
+        let stream = py.allow_threads(|| {
+            let conn = inner.lock();
+            conn.query_stream(&sql).into_pyresult()
+        })?;
+        Ok(Subscription::from_core(stream))
     }
 
     /// Subscribe to a continuous query (async iterator).
     fn subscribe_async<'py>(&self, py: Python<'py>, sql: &str) -> PyResult<Bound<'py, PyAny>> {
         self.check_closed()?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         let sql = sql.to_owned();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let sub = conn.subscribe(&sql).await.into_pyresult()?;
-            Ok(AsyncSubscription::from_core(sub))
+            let stream = {
+                let conn = inner.lock();
+                conn.query_stream(&sql).into_pyresult()?
+            };
+            Ok(AsyncSubscription::from_core(stream))
         })
     }
 
-    /// Get the schema of a table as a PyArrow Schema.
-    fn schema(&self, py: Python<'_>, table: &str) -> PyResult<PyObject> {
+    /// Get the schema of a source as a PyArrow Schema.
+    fn schema(&self, py: Python<'_>, table: &str) -> PyResult<Py<PyAny>> {
         self.check_closed()?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         let table = table.to_owned();
-        let schema = py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            rt.block_on(conn.schema(&table)).into_pyresult()
+        let schema: SchemaRef = py.allow_threads(|| {
+            let conn = inner.lock();
+            conn.get_schema(&table).into_pyresult()
         })?;
-        let pa_schema = pyo3_arrow::PyArrowConvert::to_pyarrow(&Arc::new(schema), py)?;
-        Ok(pa_schema.into_pyobject(py)?.into_any().unbind())
+        let py_schema = PySchema::from(schema);
+        let obj = py_schema.into_pyarrow(py)?;
+        Ok(obj.into_pyobject(py)?.into_any().unbind())
     }
 
-    /// Create a new table with the given schema.
+    /// Create a new source via SQL DDL.
     fn create_table(&self, py: Python<'_>, name: &str, schema: &Bound<'_, PyAny>) -> PyResult<()> {
         self.check_closed()?;
         let arrow_schema = conversion::python_to_schema(py, schema)?;
-        let conn = self.inner.clone();
-        let name = name.to_owned();
+        // Build a CREATE SOURCE DDL statement
+        let columns: Vec<String> = arrow_schema
+            .fields()
+            .iter()
+            .map(|f| format!("{} {}", f.name(), arrow_type_to_sql(f.data_type())))
+            .collect();
+        let ddl = format!("CREATE SOURCE {} ({})", name, columns.join(", "));
+        let inner = self.inner.clone();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            rt.block_on(conn.create_table(&name, &arrow_schema)).into_pyresult()
+            let conn = inner.lock();
+            conn.execute(&ddl).into_pyresult()?;
+            Ok(())
         })
     }
 
-    /// List all tables in the database.
+    /// List all sources in the database.
     fn list_tables(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         self.check_closed()?;
-        let conn = self.inner.clone();
+        let inner = self.inner.clone();
         py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            rt.block_on(conn.list_tables()).into_pyresult()
+            let conn = inner.lock();
+            Ok(conn.list_sources())
         })
     }
 
     /// Close the connection.
     fn close(&mut self, py: Python<'_>) -> PyResult<()> {
         if !self.closed {
-            let conn = self.inner.clone();
-            py.allow_threads(|| {
-                let rt = crate::async_support::runtime();
-                rt.block_on(conn.close()).into_pyresult()
-            })?;
             self.closed = true;
+            // Connection::close consumes self, so we need to take it out
+            // Since we use Arc<Mutex<>>, we attempt close if we're the last reference
+            let inner = self.inner.clone();
+            py.allow_threads(|| -> PyResult<()> {
+                // Try to take ownership for close; if other refs exist, drop will handle it
+                if let Ok(mutex) = Arc::try_unwrap(inner) {
+                    let conn = mutex.into_inner();
+                    let _ = conn.close();
+                }
+                Ok(())
+            })?;
         }
         Ok(())
     }
 
-    // Context manager support
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
@@ -198,7 +223,7 @@ impl PyConnection {
         _exc_tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<bool> {
         self.close(py)?;
-        Ok(false) // don't suppress exceptions
+        Ok(false)
     }
 
     fn __repr__(&self) -> String {
@@ -211,10 +236,9 @@ impl PyConnection {
 }
 
 impl PyConnection {
-    /// Create a new connection wrapper from a core connection.
-    pub fn from_core(conn: laminardb_core::Connection) -> Self {
+    pub fn from_core(conn: laminar_db::api::Connection) -> Self {
         Self {
-            inner: Arc::new(conn),
+            inner: Arc::new(Mutex::new(conn)),
             closed: false,
         }
     }
@@ -228,35 +252,54 @@ impl PyConnection {
     }
 }
 
+/// Map Arrow DataType to a SQL type string for DDL generation.
+fn arrow_type_to_sql(dt: &arrow_schema::DataType) -> &'static str {
+    use arrow_schema::DataType;
+    match dt {
+        DataType::Int8 => "TINYINT",
+        DataType::Int16 => "SMALLINT",
+        DataType::Int32 => "INT",
+        DataType::Int64 => "BIGINT",
+        DataType::UInt8 => "TINYINT UNSIGNED",
+        DataType::UInt16 => "SMALLINT UNSIGNED",
+        DataType::UInt32 => "INT UNSIGNED",
+        DataType::UInt64 => "BIGINT UNSIGNED",
+        DataType::Float32 => "FLOAT",
+        DataType::Float64 => "DOUBLE",
+        DataType::Boolean => "BOOLEAN",
+        DataType::Utf8 | DataType::LargeUtf8 => "VARCHAR",
+        DataType::Binary | DataType::LargeBinary => "BLOB",
+        DataType::Date32 | DataType::Date64 => "DATE",
+        DataType::Timestamp(_, _) => "TIMESTAMP",
+        _ => "VARCHAR",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Stream iterator (for `Connection.stream()`)
 // ---------------------------------------------------------------------------
 
-#[pyclass(name = "_QueryResultIter")]
-pub struct QueryResultIter {
-    inner: laminardb_core::QueryStream,
+#[pyclass(name = "_QueryStreamIter")]
+pub struct QueryStreamIter {
+    inner: Mutex<laminar_db::api::QueryStream>,
 }
 
-unsafe impl Send for QueryResultIter {}
-unsafe impl Sync for QueryResultIter {}
+unsafe impl Send for QueryStreamIter {}
+unsafe impl Sync for QueryStreamIter {}
 
 #[pymethods]
-impl QueryResultIter {
+impl QueryStreamIter {
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
 
-    fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        let stream = &mut self.inner;
-        let next = py.allow_threads(|| {
-            let rt = crate::async_support::runtime();
-            rt.block_on(stream.next())
-        });
-        match next {
-            Some(result) => {
-                let batch = result.into_pyresult()?;
-                Ok(Some(QueryResult::from_core(batch)))
-            }
+    fn __next__(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
+        let result = py.allow_threads(|| {
+            let mut stream = self.inner.lock();
+            stream.next().into_pyresult()
+        })?;
+        match result {
+            Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
             None => Ok(None),
         }
     }
