@@ -617,6 +617,70 @@ impl PyConnection {
         pyo3_async_runtimes::tokio::future_into_py(py, async { Ok(false) })
     }
 
+    // ── DuckDB-style aliases ──
+
+    /// Execute a SQL query (DuckDB-style alias for `query()`).
+    ///
+    /// `params` is reserved for future parameterized query support.
+    #[pyo3(signature = (query, params = None))]
+    fn sql(
+        &self,
+        py: Python<'_>,
+        query: &str,
+        params: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<QueryResult> {
+        let _ = params;
+        self.query(py, query)
+    }
+
+    /// List all tables/sources (DuckDB-style alias for `list_tables()`).
+    fn tables(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.list_tables(py)
+    }
+
+    /// List all materialized views/streams (DuckDB-style alias for `list_streams()`).
+    fn materialized_views(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.list_streams(py)
+    }
+
+    /// Show the query execution plan.
+    fn explain(&self, py: Python<'_>, query: &str) -> PyResult<String> {
+        self.check_closed()?;
+        let explain_sql = format!("EXPLAIN {}", query);
+        let result = self.query(py, &explain_sql)?;
+        let table = conversion::batches_to_pyarrow(py, result.batches_ref(), result.schema_ref())?;
+        let text: String = table.call_method0("to_string")?.extract()?;
+        Ok(text)
+    }
+
+    /// Get statistics for a table/source as a dict.
+    fn stats(&self, py: Python<'_>, table: &str) -> PyResult<Py<PyAny>> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let table_owned = table.to_owned();
+        let metrics = py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.source_metrics(&table_owned)
+        });
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("name", table)?;
+        match metrics {
+            Some(m) => {
+                dict.set_item("total_events", m.total_events)?;
+                dict.set_item("pending", m.pending)?;
+                dict.set_item("capacity", m.capacity)?;
+                dict.set_item("is_backpressured", m.is_backpressured)?;
+                dict.set_item("watermark", m.watermark)?;
+                dict.set_item("utilization", m.utilization)?;
+            }
+            None => {
+                dict.set_item("total_events", py.None())?;
+            }
+        }
+        Ok(dict.into_any().unbind())
+    }
+
     fn __repr__(&self) -> String {
         if self.closed {
             "Connection(closed)".to_owned()

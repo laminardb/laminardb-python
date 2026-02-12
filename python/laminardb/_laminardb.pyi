@@ -44,6 +44,18 @@ class SubscriptionError(LaminarError):
     """Raised when a subscription operation fails."""
     ...
 
+class StreamError(LaminarError):
+    """Raised when a stream or materialized view operation fails."""
+    ...
+
+class CheckpointError(LaminarError):
+    """Raised when a checkpoint operation fails."""
+    ...
+
+class ConnectorError(LaminarError):
+    """Raised when a connector operation fails."""
+    ...
+
 # ---------------------------------------------------------------------------
 # Error codes
 # ---------------------------------------------------------------------------
@@ -277,6 +289,28 @@ class Connection:
         """
         ...
 
+    # ── DuckDB-style aliases ──
+
+    def sql(self, query: str, params: Any = None) -> QueryResult:
+        """Execute a SQL query (DuckDB-style alias for query())."""
+        ...
+
+    def tables(self) -> list[str]:
+        """List all tables/sources (alias for list_tables())."""
+        ...
+
+    def materialized_views(self) -> list[str]:
+        """List all materialized views/streams (alias for list_streams())."""
+        ...
+
+    def explain(self, query: str) -> str:
+        """Show the query execution plan."""
+        ...
+
+    def stats(self, table: str) -> dict[str, Any]:
+        """Get statistics for a table/source."""
+        ...
+
     # ── Catalog info ──
 
     def sources(self) -> list[SourceInfo]:
@@ -401,6 +435,12 @@ class QueryResult:
     def columns(self) -> list[str]: ...
 
     def __repr__(self) -> str: ...
+    def __len__(self) -> int:
+        """Number of rows (enables len(result))."""
+        ...
+    def __iter__(self) -> Iterator[tuple[Any, ...]]:
+        """Iterate over rows as tuples."""
+        ...
 
     def to_arrow(self) -> Any:
         """Convert to a PyArrow Table."""
@@ -424,6 +464,40 @@ class QueryResult:
 
     def __arrow_c_stream__(self, requested_schema: Any = None) -> Any:
         """Export via Arrow PyCapsule interface."""
+        ...
+
+    # ── DuckDB-style methods ──
+
+    def df(self) -> Any:
+        """Convert to a Pandas DataFrame (DuckDB-style alias)."""
+        ...
+
+    def pl(self, *, lazy: bool = False) -> Any:
+        """Convert to a Polars DataFrame. If lazy=True, returns LazyFrame."""
+        ...
+
+    def arrow(self) -> Any:
+        """Convert to a PyArrow Table (DuckDB-style alias)."""
+        ...
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        """Fetch all rows as a list of tuples."""
+        ...
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        """Fetch the first row as a tuple, or None if empty."""
+        ...
+
+    def fetchmany(self, size: int = 1) -> list[tuple[Any, ...]]:
+        """Fetch up to size rows as a list of tuples."""
+        ...
+
+    def show(self, max_rows: int = 20) -> None:
+        """Print a preview of the result."""
+        ...
+
+    def _repr_html_(self) -> str:
+        """HTML representation for Jupyter notebooks."""
         ...
 
 # ---------------------------------------------------------------------------

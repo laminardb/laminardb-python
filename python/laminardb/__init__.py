@@ -11,10 +11,16 @@ Key classes:
     AsyncSubscription  Asynchronous continuous query subscription.
     StreamSubscription  Synchronous named-stream subscription.
     AsyncStreamSubscription  Asynchronous named-stream subscription.
+    MaterializedView  High-level wrapper for named streams.
+    Schema          Convenience wrapper around PyArrow Schema.
+    ChangeEvent     A batch of change rows from a subscription.
+    ChangeRow       A single row from a change stream.
 
 Functions:
     open(path)      Open a file-based LaminarDB database.
     connect(uri)    Connect to a LaminarDB database via URI.
+    sql(query)      Execute SQL on the default connection.
+    execute(query)  Execute SQL on the default connection.
 
 Exceptions:
     LaminarError        Base exception for all LaminarDB errors.
@@ -23,13 +29,20 @@ Exceptions:
     IngestionError      Data insertion failures.
     SchemaError         Schema operation failures.
     SubscriptionError   Subscription failures.
+    StreamError         Stream/materialized view failures.
+    CheckpointError     Checkpoint failures.
+    ConnectorError      Connector failures.
 """
+
+import threading
 
 from laminardb._laminardb import (
     AsyncStreamSubscription,
     AsyncSubscription,
+    CheckpointError,
     Connection,
     ConnectionError,
+    ConnectorError,
     ExecuteResult,
     IngestionError,
     LaminarConfig,
@@ -45,6 +58,7 @@ from laminardb._laminardb import (
     SinkInfo,
     SourceInfo,
     SourceMetrics,
+    StreamError,
     StreamInfo,
     StreamMetrics,
     StreamSubscription,
@@ -57,11 +71,93 @@ from laminardb._laminardb import (
     open,
 )
 
+from laminardb.types import (
+    ChangeEvent,
+    ChangeRow,
+    CheckpointStatus,
+    Column,
+    MaterializedView,
+    Metrics,
+    Schema,
+    TableStats,
+    Watermark,
+)
+
+# ---------------------------------------------------------------------------
+# Aliases
+# ---------------------------------------------------------------------------
+
+Config = LaminarConfig
+BatchWriter = Writer
+
+# ---------------------------------------------------------------------------
+# Module-level default connection
+# ---------------------------------------------------------------------------
+
+_default_connection: Connection | None = None
+_default_lock = threading.Lock()
+
+
+def _get_default() -> Connection:
+    """Get or create the default in-memory connection."""
+    global _default_connection
+    with _default_lock:
+        if _default_connection is None or _default_connection.is_closed:
+            _default_connection = open(":memory:")
+        return _default_connection
+
+
+def sql(query: str, params: object = None) -> QueryResult:
+    """Execute a SQL query on the default connection.
+
+    Args:
+        query: The SQL query to execute.
+        params: Reserved for future parameterized query support.
+
+    Returns:
+        QueryResult with the query results.
+    """
+    return _get_default().sql(query, params)
+
+
+def execute(query: str, params: object = None) -> ExecuteResult:
+    """Execute a SQL statement on the default connection.
+
+    Args:
+        query: The SQL statement to execute.
+        params: Reserved for future parameterized query support.
+
+    Returns:
+        ExecuteResult with the statement result.
+    """
+    _ = params
+    return _get_default().execute(query)
+
+
+def mv(conn: Connection, name: str, sql_def: str | None = None) -> MaterializedView:
+    """Create a MaterializedView helper for a named stream.
+
+    Args:
+        conn: The connection to use.
+        name: The stream/view name.
+        sql_def: Optional SQL definition.
+
+    Returns:
+        A MaterializedView wrapper.
+    """
+    return MaterializedView(conn, name, sql_def)
+
+
 __all__ = [
     "__version__",
     "codes",
     "connect",
     "open",
+    # Module-level functions
+    "sql",
+    "execute",
+    "mv",
+    # Core classes
     "Connection",
     "ExecuteResult",
     "LaminarConfig",
@@ -71,6 +167,19 @@ __all__ = [
     "AsyncSubscription",
     "StreamSubscription",
     "AsyncStreamSubscription",
+    # Aliases
+    "Config",
+    "BatchWriter",
+    # High-level types
+    "MaterializedView",
+    "Schema",
+    "Column",
+    "ChangeEvent",
+    "ChangeRow",
+    "TableStats",
+    "Watermark",
+    "CheckpointStatus",
+    "Metrics",
     # Catalog info
     "SourceInfo",
     "SinkInfo",
@@ -91,4 +200,7 @@ __all__ = [
     "IngestionError",
     "SchemaError",
     "SubscriptionError",
+    "StreamError",
+    "CheckpointError",
+    "ConnectorError",
 ]

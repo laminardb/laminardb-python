@@ -52,6 +52,24 @@ create_exception!(
     LaminarError,
     "Raised when a subscription operation fails."
 );
+create_exception!(
+    laminardb,
+    StreamError,
+    LaminarError,
+    "Raised when a stream or materialized view operation fails."
+);
+create_exception!(
+    laminardb,
+    CheckpointError,
+    LaminarError,
+    "Raised when a checkpoint operation fails."
+);
+create_exception!(
+    laminardb,
+    ConnectorError,
+    LaminarError,
+    "Raised when a connector operation fails."
+);
 
 // ---------------------------------------------------------------------------
 // Core error → Python exception mapping
@@ -139,6 +157,15 @@ pub fn register_exceptions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     parent.add(
         "SubscriptionError",
         parent.py().get_type::<SubscriptionError>(),
+    )?;
+    parent.add("StreamError", parent.py().get_type::<StreamError>())?;
+    parent.add(
+        "CheckpointError",
+        parent.py().get_type::<CheckpointError>(),
+    )?;
+    parent.add(
+        "ConnectorError",
+        parent.py().get_type::<ConnectorError>(),
     )?;
     Ok(())
 }

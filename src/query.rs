@@ -94,6 +94,101 @@ impl QueryResult {
         }
     }
 
+    // ── DuckDB-style aliases ──
+
+    /// Convert to a Pandas DataFrame (DuckDB-style alias for `to_pandas()`).
+    fn df<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.to_pandas(py)
+    }
+
+    /// Convert to a Polars DataFrame (DuckDB-style alias).
+    ///
+    /// If `lazy=True`, wraps the result in a Polars `LazyFrame`.
+    #[pyo3(signature = (*, lazy = false))]
+    fn pl<'py>(&self, py: Python<'py>, lazy: bool) -> PyResult<Bound<'py, PyAny>> {
+        let df = self.to_polars(py)?;
+        if lazy {
+            df.call_method0("lazy")
+        } else {
+            Ok(df)
+        }
+    }
+
+    /// Convert to a PyArrow Table (DuckDB-style alias for `to_arrow()`).
+    fn arrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        self.to_arrow(py)
+    }
+
+    /// Fetch all rows as a list of tuples.
+    fn fetchall<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let table = self.to_arrow(py)?;
+        let pylist = table.call_method0("to_pylist")?;
+        // Convert list[dict] → list[tuple] by extracting values
+        let builtins = py.import("builtins")?;
+        let tuple_fn = builtins.getattr("tuple")?;
+        let rows = pyo3::types::PyList::empty(py);
+        for row in pylist.try_iter()? {
+            let row: Bound<'py, PyAny> = row?;
+            let values = row.call_method0("values")?;
+            let tup = tuple_fn.call1((values,))?;
+            rows.append(tup)?;
+        }
+        Ok(rows.into_any())
+    }
+
+    /// Fetch the first row as a tuple, or None if empty.
+    fn fetchone<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        if self.num_rows() == 0 {
+            return Ok(py.None().into_bound(py));
+        }
+        let rows = self.fetchall(py)?;
+        rows.get_item(0)
+    }
+
+    /// Fetch up to `size` rows as a list of tuples.
+    #[pyo3(signature = (size = 1))]
+    fn fetchmany<'py>(&self, py: Python<'py>, size: usize) -> PyResult<Bound<'py, PyAny>> {
+        let rows = self.fetchall(py)?;
+        let len = rows.len()?;
+        let end = std::cmp::min(size, len);
+        let slice = rows.call_method1("__getitem__", (pyo3::types::PySlice::new(py, 0, end as isize, 1),))?;
+        Ok(slice)
+    }
+
+    /// Print a preview of the result (up to `max_rows` rows).
+    #[pyo3(signature = (max_rows = 20))]
+    fn show<'py>(&self, py: Python<'py>, max_rows: usize) -> PyResult<()> {
+        let table = self.to_arrow(py)?;
+        let sliced = table.call_method1("slice", (0, max_rows))?;
+        let df = sliced.call_method0("to_pandas")?;
+        let text = df.call_method0("to_string")?;
+        let builtins = py.import("builtins")?;
+        builtins.call_method1("print", (text,))?;
+        Ok(())
+    }
+
+    /// HTML representation for Jupyter notebooks.
+    fn _repr_html_<'py>(&self, py: Python<'py>) -> PyResult<String> {
+        match self.to_pandas(py) {
+            Ok(df) => {
+                let html = df.call_method0("_repr_html_")?;
+                html.extract::<String>()
+            }
+            Err(_) => Ok(format!("<pre>{}</pre>", self.__repr__())),
+        }
+    }
+
+    /// Number of rows (enables `len(result)`).
+    fn __len__(&self) -> usize {
+        self.num_rows()
+    }
+
+    /// Iterate over rows as tuples (enables `for row in result`).
+    fn __iter__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let rows = self.fetchall(py)?;
+        rows.call_method0("__iter__")
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "QueryResult(rows={}, columns={})",
