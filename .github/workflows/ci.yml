@@ -41,13 +41,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install maturin and build
+      - name: Create virtualenv and install
         run: |
+          python -m venv .venv
+          source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install maturin
           maturin develop --extras dev
       - name: Run tests
-        run: pytest tests/ -v
+        run: |
+          source .venv/bin/activate
+          pytest tests/ -v
 
   type-check:
     name: Type check
@@ -63,6 +67,8 @@ jobs:
           python-version: "3.12"
       - name: Install and type-check
         run: |
+          python -m venv .venv
+          source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install maturin mypy pyarrow pandas-stubs
           maturin develop
