@@ -1990,6 +1990,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "async-trait",
+ "bumpalo",
  "datafusion",
  "datafusion-common",
  "fxhash",

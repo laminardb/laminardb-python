@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Clone laminardb monorepo
+        run: git clone --depth 1 https://github.com/laminardb/laminardb.git ../laminardb
       - name: Extract tag version
         id: tag
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -53,6 +55,8 @@ jobs:
             target: x86_64
     steps:
       - uses: actions/checkout@v4
+      - name: Clone laminardb monorepo
+        run: git clone --depth 1 https://github.com/laminardb/laminardb.git ../laminardb
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -73,6 +77,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Clone laminardb monorepo
+        run: git clone --depth 1 https://github.com/laminardb/laminardb.git ../laminardb
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
