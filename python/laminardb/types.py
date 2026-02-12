@@ -108,22 +108,22 @@ class Metrics:
         uptime = self._inner.uptime_secs
         if uptime <= 0:
             return 0.0
-        return self._inner.total_events_ingested / uptime
+        return float(self._inner.total_events_ingested / uptime)
 
     @property
     def memory_used_bytes(self) -> int:
         """Total events ingested (proxy for memory usage)."""
-        return self._inner.total_events_ingested
+        return int(self._inner.total_events_ingested)
 
     @property
     def uptime_secs(self) -> float:
         """Pipeline uptime in seconds."""
-        return self._inner.uptime_secs
+        return float(self._inner.uptime_secs)
 
     @property
     def state(self) -> str:
         """Pipeline state."""
-        return self._inner.state
+        return str(self._inner.state)
 
     def __repr__(self) -> str:
         return (
@@ -190,7 +190,7 @@ class ChangeEvent:
         return iter(self._materialize())
 
     def __len__(self) -> int:
-        return self._result.num_rows
+        return int(self._result.num_rows)
 
     def df(self) -> Any:
         """Convert to a Pandas DataFrame."""
