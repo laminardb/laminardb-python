@@ -159,13 +159,7 @@ pub fn register_exceptions(parent: &Bound<'_, PyModule>) -> PyResult<()> {
         parent.py().get_type::<SubscriptionError>(),
     )?;
     parent.add("StreamError", parent.py().get_type::<StreamError>())?;
-    parent.add(
-        "CheckpointError",
-        parent.py().get_type::<CheckpointError>(),
-    )?;
-    parent.add(
-        "ConnectorError",
-        parent.py().get_type::<ConnectorError>(),
-    )?;
+    parent.add("CheckpointError", parent.py().get_type::<CheckpointError>())?;
+    parent.add("ConnectorError", parent.py().get_type::<ConnectorError>())?;
     Ok(())
 }

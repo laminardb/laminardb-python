@@ -59,7 +59,10 @@ impl PyLaminarConfig {
     fn __repr__(&self) -> String {
         format!(
             "LaminarConfig(buffer_size={}, storage_dir={:?}, checkpoint_interval_ms={:?}, table_spill_threshold={})",
-            self.buffer_size, self.storage_dir, self.checkpoint_interval_ms, self.table_spill_threshold
+            self.buffer_size,
+            self.storage_dir,
+            self.checkpoint_interval_ms,
+            self.table_spill_threshold
         )
     }
 }
@@ -69,11 +72,13 @@ impl PyLaminarConfig {
     pub fn to_core(&self) -> laminar_db::LaminarConfig {
         use laminar_core::streaming::StreamCheckpointConfig;
 
-        let checkpoint = self.checkpoint_interval_ms.map(|ms| StreamCheckpointConfig {
-            interval_ms: Some(ms),
-            data_dir: self.storage_dir.as_ref().map(PathBuf::from),
-            ..StreamCheckpointConfig::default()
-        });
+        let checkpoint = self
+            .checkpoint_interval_ms
+            .map(|ms| StreamCheckpointConfig {
+                interval_ms: Some(ms),
+                data_dir: self.storage_dir.as_ref().map(PathBuf::from),
+                ..StreamCheckpointConfig::default()
+            });
 
         laminar_db::LaminarConfig {
             default_buffer_size: self.buffer_size,

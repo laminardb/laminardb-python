@@ -151,7 +151,10 @@ impl QueryResult {
         let rows = self.fetchall(py)?;
         let len = rows.len()?;
         let end = std::cmp::min(size, len);
-        let slice = rows.call_method1("__getitem__", (pyo3::types::PySlice::new(py, 0, end as isize, 1),))?;
+        let slice = rows.call_method1(
+            "__getitem__",
+            (pyo3::types::PySlice::new(py, 0, end as isize, 1),),
+        )?;
         Ok(slice)
     }
 

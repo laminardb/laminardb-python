@@ -50,7 +50,10 @@ impl PyPipelineNode {
     }
 
     fn __repr__(&self) -> String {
-        format!("PipelineNode(name='{}', type='{}')", self.name, self.node_type)
+        format!(
+            "PipelineNode(name='{}', type='{}')",
+            self.name, self.node_type
+        )
     }
 }
 
@@ -154,8 +157,16 @@ impl PyPipelineTopology {
 impl PyPipelineTopology {
     pub fn from_core(topo: laminar_db::PipelineTopology) -> Self {
         Self {
-            nodes: topo.nodes.into_iter().map(PyPipelineNode::from_core).collect(),
-            edges: topo.edges.into_iter().map(PyPipelineEdge::from_core).collect(),
+            nodes: topo
+                .nodes
+                .into_iter()
+                .map(PyPipelineNode::from_core)
+                .collect(),
+            edges: topo
+                .edges
+                .into_iter()
+                .map(PyPipelineEdge::from_core)
+                .collect(),
         }
     }
 }
@@ -230,9 +241,7 @@ impl PyPipelineMetrics {
     fn __repr__(&self) -> String {
         format!(
             "PipelineMetrics(state={:?}, ingested={}, emitted={})",
-            self.inner.state,
-            self.inner.total_events_ingested,
-            self.inner.total_events_emitted
+            self.inner.state, self.inner.total_events_ingested, self.inner.total_events_emitted
         )
     }
 }

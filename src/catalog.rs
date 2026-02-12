@@ -135,10 +135,7 @@ impl PyQueryInfo {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "QueryInfo(id={}, active={})",
-            self.id, self.active
-        )
+        format!("QueryInfo(id={}, active={})", self.id, self.active)
     }
 }
 

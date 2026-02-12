@@ -16,9 +16,7 @@ use crate::catalog::{PyQueryInfo, PySinkInfo, PySourceInfo, PyStreamInfo};
 use crate::conversion;
 use crate::error::{ConnectionError, IntoPyResult, QueryError};
 use crate::execute::ExecuteResult;
-use crate::metrics::{
-    PyPipelineMetrics, PyPipelineTopology, PySourceMetrics, PyStreamMetrics,
-};
+use crate::metrics::{PyPipelineMetrics, PyPipelineTopology, PySourceMetrics, PyStreamMetrics};
 use crate::query::QueryResult;
 use crate::stream_subscription::{AsyncStreamSubscription, StreamSubscription};
 use crate::subscription::Subscription;
@@ -345,7 +343,11 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            Ok(conn.source_info().into_iter().map(PySourceInfo::from_core).collect())
+            Ok(conn
+                .source_info()
+                .into_iter()
+                .map(PySourceInfo::from_core)
+                .collect())
         })
     }
 
@@ -356,7 +358,11 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            Ok(conn.sink_info().into_iter().map(PySinkInfo::from_core).collect())
+            Ok(conn
+                .sink_info()
+                .into_iter()
+                .map(PySinkInfo::from_core)
+                .collect())
         })
     }
 
@@ -367,7 +373,11 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            Ok(conn.stream_info().into_iter().map(PyStreamInfo::from_core).collect())
+            Ok(conn
+                .stream_info()
+                .into_iter()
+                .map(PyStreamInfo::from_core)
+                .collect())
         })
     }
 
@@ -378,7 +388,11 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            Ok(conn.query_info().into_iter().map(PyQueryInfo::from_core).collect())
+            Ok(conn
+                .query_info()
+                .into_iter()
+                .map(PyQueryInfo::from_core)
+                .collect())
         })
     }
 
@@ -499,7 +513,11 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            Ok(conn.all_source_metrics().into_iter().map(PySourceMetrics::from_core).collect())
+            Ok(conn
+                .all_source_metrics()
+                .into_iter()
+                .map(PySourceMetrics::from_core)
+                .collect())
         })
     }
 
@@ -522,7 +540,11 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            Ok(conn.all_stream_metrics().into_iter().map(PyStreamMetrics::from_core).collect())
+            Ok(conn
+                .all_stream_metrics()
+                .into_iter()
+                .map(PyStreamMetrics::from_core)
+                .collect())
         })
     }
 

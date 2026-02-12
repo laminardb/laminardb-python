@@ -51,9 +51,9 @@ impl ExecuteResult {
 
     /// Convert to a QueryResult if this was a query or metadata result.
     fn to_query_result(&self) -> Option<QueryResult> {
-        self.query_result.as_ref().map(|qr| {
-            QueryResult::new(qr.batches_ref().to_vec(), qr.schema_ref().clone())
-        })
+        self.query_result
+            .as_ref()
+            .map(|qr| QueryResult::new(qr.batches_ref().to_vec(), qr.schema_ref().clone()))
     }
 
     /// Support `int(result)` → rows affected count.
