@@ -26,13 +26,13 @@ conn.sql("SELECT * FROM sensors WHERE value > 43.0").df()
 
 ## Why laminardb?
 
-- **DuckDB-style API** &mdash; `.sql()`, `.df()`, `.arrow()`, `.fetchall()`, `.show()` — feels like DuckDB
-- **Streaming-first** &mdash; continuous query subscriptions, materialized views, change events
+- **DuckDB-style API** &mdash; `.sql()`, `.df()`, `.arrow()`, `.fetchall()`, `.show()` &mdash; feels like DuckDB
+- **Streaming-first** &mdash; sources, streams, sinks, watermarks, continuous subscriptions
 - **10 input formats** &mdash; dicts, pandas, polars, pyarrow, JSON, CSV, Arrow PyCapsule
 - **6 output formats** &mdash; pandas, polars, pyarrow, dicts, auto-detect, PyCapsule (zero-copy)
 - **Full type safety** &mdash; PEP 561 stubs with `py.typed`, passes `mypy --strict`
 - **Thread-safe** &mdash; GIL release on all blocking ops, `Send + Sync` for free-threaded Python 3.13t+
-- **Pipeline observability** &mdash; topology, metrics, watermarks, catalog introspection
+- **Pipeline observability** &mdash; topology DAG, per-component metrics, watermark tracking
 
 ## Installation
 
@@ -53,6 +53,32 @@ Requires **Python 3.11+** and a supported platform (Linux x86_64/aarch64, macOS 
 
 ---
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Core Concepts: Sources, Streams, Sinks](#core-concepts-sources-streams-sinks)
+- [Connections](#connections)
+- [Sources](#sources)
+- [Data Ingestion](#data-ingestion)
+- [Streams (Materialized Views)](#streams-materialized-views)
+- [Sinks](#sinks)
+- [Watermarks & Event Time](#watermarks--event-time)
+- [Querying](#querying)
+- [Subscriptions](#subscriptions)
+- [Streaming Examples](#streaming-examples)
+- [Pipeline Control](#pipeline-control)
+- [Catalog Introspection](#catalog-introspection)
+- [Pipeline Metrics & Observability](#pipeline-metrics--observability)
+- [Error Handling](#error-handling)
+- [Configuration](#configuration)
+- [Python Types](#python-types)
+- [Async Support](#async-support)
+- [Performance](#performance)
+- [API Aliases (DuckDB Compatibility)](#api-aliases-duckdb-compatibility)
+- [Contributing](#contributing)
+
+---
+
 ## Quick Start
 
 ### Connect and query
@@ -60,10 +86,7 @@ Requires **Python 3.11+** and a supported platform (Linux x86_64/aarch64, macOS 
 ```python
 import laminardb
 
-# Open a connection
 conn = laminardb.open(":memory:")
-
-# Create a source and insert data
 conn.execute("CREATE SOURCE sensors (ts BIGINT, device VARCHAR, value DOUBLE)")
 conn.insert("sensors", [
     {"ts": 1, "device": "sensor_a", "value": 42.0},
@@ -71,15 +94,33 @@ conn.insert("sensors", [
     {"ts": 3, "device": "sensor_a", "value": 44.1},
 ])
 
-# Query with DuckDB-style .sql()
 result = conn.sql("SELECT * FROM sensors WHERE value > 43.0")
-
 result.show()          # print to terminal
 df = result.df()       # -> pandas DataFrame
 pl_df = result.pl()    # -> polars DataFrame
 table = result.arrow() # -> pyarrow Table
 rows = result.fetchall()  # -> list of tuples
+conn.close()
+```
 
+### Real-time streaming in 10 lines
+
+```python
+import laminardb
+
+conn = laminardb.open(":memory:")
+conn.execute("CREATE SOURCE readings (ts BIGINT, sensor VARCHAR, temp DOUBLE)")
+conn.execute("CREATE STREAM alerts AS SELECT * FROM readings WHERE temp > 100.0")
+conn.start()
+
+# Subscribe to the alerts stream
+sub = conn.subscribe_stream("alerts")
+conn.insert("readings", {"ts": 1, "sensor": "boiler_1", "temp": 105.3})
+
+batch = sub.next_timeout(2000)  # wait up to 2s
+if batch:
+    batch.show()  # shows the alert row
+sub.cancel()
 conn.close()
 ```
 
@@ -89,8 +130,7 @@ conn.close()
 import laminardb
 
 # Uses a thread-safe default in-memory connection
-result = laminardb.sql("SELECT 1 + 1 AS answer")
-result.show()
+laminardb.sql("SELECT 1 + 1 AS answer").show()
 ```
 
 ### Context manager
@@ -101,6 +141,74 @@ with laminardb.open(":memory:") as conn:
     conn.insert("events", [{"id": 1, "name": "click"}, {"id": 2, "name": "view"}])
     conn.sql("SELECT * FROM events").show()
 # auto-closes on exit
+```
+
+---
+
+## Core Concepts: Sources, Streams, Sinks
+
+LaminarDB is a **streaming SQL database**. Data flows through a pipeline of three primitives:
+
+```
+Sources  -->  Streams  -->  Sinks
+(ingest)     (transform)    (output)
+```
+
+| Concept | What it is | SQL | Python API |
+|---------|-----------|-----|------------|
+| **Source** | Entry point for data. Defines a schema and accepts inserts. | `CREATE SOURCE` | `conn.create_table()`, `conn.insert()` |
+| **Stream** | A continuously-maintained SQL query over sources or other streams. Like a materialized view that updates in real time. | `CREATE STREAM ... AS SELECT ...` | `conn.execute()`, `conn.subscribe_stream()` |
+| **Sink** | An output destination that receives data from streams. | `CREATE SINK` | `conn.execute()` |
+
+### How it works
+
+1. **Create sources** &mdash; define the schema for incoming data
+2. **Create streams** &mdash; write SQL transformations that run continuously
+3. **Start the pipeline** &mdash; `conn.start()` begins processing
+4. **Insert data** &mdash; push rows into sources via `insert()` or a `Writer`
+5. **Subscribe** &mdash; receive real-time results from streams as data flows through
+6. **Query** &mdash; run ad-hoc SQL at any time with `conn.sql()`
+
+```python
+conn = laminardb.open(":memory:")
+
+# 1. Define sources
+conn.execute("CREATE SOURCE page_views (ts BIGINT, user_id VARCHAR, page VARCHAR)")
+conn.execute("CREATE SOURCE clicks     (ts BIGINT, user_id VARCHAR, button VARCHAR)")
+
+# 2. Define streams (continuous SQL transformations)
+conn.execute("""
+    CREATE STREAM active_users AS
+    SELECT user_id, COUNT(*) AS view_count
+    FROM page_views
+    GROUP BY user_id
+""")
+
+conn.execute("""
+    CREATE STREAM click_through AS
+    SELECT p.user_id, p.page, c.button
+    FROM page_views p
+    JOIN clicks c ON p.user_id = c.user_id
+""")
+
+# 3. Start the pipeline
+conn.start()
+
+# 4. Insert data into sources
+conn.insert("page_views", {"ts": 1, "user_id": "alice", "page": "/home"})
+conn.insert("clicks", {"ts": 2, "user_id": "alice", "button": "signup"})
+
+# 5. Subscribe to stream results
+sub = conn.subscribe_stream("active_users")
+batch = sub.next_timeout(2000)
+if batch:
+    batch.show()
+sub.cancel()
+
+# 6. Ad-hoc query
+conn.sql("SELECT * FROM page_views").show()
+
+conn.close()
 ```
 
 ---
@@ -141,28 +249,64 @@ conn.is_checkpoint_enabled  # whether checkpointing is enabled
 
 ---
 
-## Creating Sources
+## Sources
 
-Sources define the schema for data ingestion.
+Sources are the **entry points** for data into the pipeline. Each source has a fixed schema and an internal buffer for incoming rows.
+
+### Creating sources
 
 ```python
-# Dict schema (column_name -> Arrow type string)
-conn.create_table("events", {
+# Via SQL
+conn.execute("CREATE SOURCE sensors (ts BIGINT, device VARCHAR, value DOUBLE)")
+
+# Via Python dict schema (column_name -> Arrow type string)
+conn.create_table("metrics", {
     "ts": "int64",
-    "kind": "string",
-    "payload": "float64",
+    "name": "string",
+    "value": "float64",
 })
 
-# PyArrow schema
+# Via PyArrow schema
 import pyarrow as pa
-conn.create_table("events", pa.schema([
+conn.create_table("logs", pa.schema([
     ("ts", pa.int64()),
-    ("kind", pa.string()),
-    ("payload", pa.float64()),
+    ("level", pa.string()),
+    ("message", pa.string()),
 ]))
+```
 
-# Via SQL
-conn.execute("CREATE SOURCE events (ts BIGINT, kind VARCHAR, payload DOUBLE)")
+### Discovering sources
+
+```python
+conn.list_tables()    # -> ["sensors", "metrics", "logs"]
+conn.tables()         # DuckDB-style alias
+
+# Detailed source info
+for source in conn.sources():
+    print(source.name)              # "sensors"
+    print(source.schema)            # pyarrow.Schema
+    print(source.watermark_column)  # watermark column name, or None
+
+# Get a specific source's schema
+schema = conn.schema("sensors")  # -> pyarrow.Schema
+```
+
+### Source metrics
+
+```python
+sm = conn.source_metrics("sensors")
+if sm:
+    print(sm.name)              # "sensors"
+    print(sm.total_events)      # total rows ingested
+    print(sm.pending)           # rows buffered, not yet processed
+    print(sm.capacity)          # buffer capacity
+    print(sm.is_backpressured)  # True if buffer is full
+    print(sm.watermark)         # current source watermark
+    print(sm.utilization)       # 0.0 - 1.0 buffer usage
+
+# All sources at once
+for sm in conn.all_source_metrics():
+    print(f"{sm.name}: {sm.total_events} events, {sm.utilization:.0%} buffer used")
 ```
 
 ---
@@ -210,19 +354,214 @@ conn.insert("sensors", arrow_capsule_object)
 
 ### Streaming writer
 
-For high-throughput ingestion with watermark support:
+For high-throughput ingestion with explicit watermark control:
 
 ```python
 with conn.writer("sensors") as w:
-    w.insert({"ts": 1, "device": "a", "value": 1.0})
-    w.insert({"ts": 2, "device": "b", "value": 2.0})
-    w.watermark(2)  # emit watermark
-    w.flush()       # explicit flush
+    for i in range(1000):
+        w.insert({"ts": i, "device": f"d{i % 10}", "value": float(i)})
+
+        # Emit watermark every 100 rows to signal time progress
+        if i % 100 == 99:
+            w.watermark(i)
 
     print(w.name)              # "sensors"
     print(w.schema)            # pyarrow.Schema
-    print(w.current_watermark) # 2
+    print(w.current_watermark) # 999
 # auto-flush on context exit
+```
+
+---
+
+## Streams (Materialized Views)
+
+Streams are **continuously-updated SQL queries**. When new data arrives at a source, all dependent streams are automatically recomputed.
+
+### Creating streams
+
+```python
+# Filter stream
+conn.execute("""
+    CREATE STREAM high_temp AS
+    SELECT * FROM sensors WHERE value > 100.0
+""")
+
+# Aggregation stream
+conn.execute("""
+    CREATE STREAM sensor_stats AS
+    SELECT device, COUNT(*) AS cnt, AVG(value) AS avg_value
+    FROM sensors
+    GROUP BY device
+""")
+
+# Join stream (across multiple sources)
+conn.execute("""
+    CREATE STREAM enriched_readings AS
+    SELECT s.ts, s.value, d.location, d.owner
+    FROM sensors s
+    JOIN device_registry d ON s.device = d.device_id
+""")
+
+# Chained streams (stream of a stream)
+conn.execute("""
+    CREATE STREAM critical_alerts AS
+    SELECT * FROM high_temp WHERE value > 200.0
+""")
+```
+
+### Discovering streams
+
+```python
+conn.list_streams()            # -> ["high_temp", "sensor_stats", ...]
+conn.materialized_views()      # DuckDB-style alias
+
+for stream in conn.streams():
+    print(stream.name)  # "high_temp"
+    print(stream.sql)   # "SELECT * FROM sensors WHERE value > 100.0"
+```
+
+### Stream metrics
+
+```python
+stm = conn.stream_metrics("high_temp")
+if stm:
+    print(stm.name)              # "high_temp"
+    print(stm.total_events)      # events emitted by this stream
+    print(stm.pending)           # events waiting to be processed
+    print(stm.capacity)          # output buffer capacity
+    print(stm.is_backpressured)  # downstream can't keep up
+    print(stm.watermark)         # stream watermark position
+    print(stm.sql)               # SQL definition
+
+for stm in conn.all_stream_metrics():
+    print(f"{stm.name}: {stm.total_events} emitted, watermark={stm.watermark}")
+```
+
+### MaterializedView wrapper
+
+For a higher-level API, wrap a stream in a `MaterializedView`:
+
+```python
+from laminardb import MaterializedView, ChangeEvent
+
+mv = laminardb.mv(conn, "high_temp", "SELECT * FROM sensors WHERE value > 100.0")
+
+# Query current state
+result = mv.query()
+result.show()
+
+# Query with filter
+result = mv.query(where="device = 'boiler_1'")
+
+# Get schema
+print(mv.schema())  # Schema wrapper
+
+# Subscribe with callback
+def on_alert(event: ChangeEvent):
+    for row in event:
+        print(f"[{row.op}] {row['device']}: {row['value']}")
+
+thread = mv.subscribe(handler=on_alert)  # background daemon thread
+```
+
+---
+
+## Sinks
+
+Sinks are **output destinations** that receive data from streams. They define where processed data goes after transformation.
+
+```python
+# Create a sink via SQL
+conn.execute("CREATE SINK output_sink FROM high_temp")
+
+# Discover sinks
+conn.list_sinks()  # -> ["output_sink"]
+
+for sink in conn.sinks():
+    print(sink.name)  # "output_sink"
+
+print(conn.sink_count)  # 1
+```
+
+---
+
+## Watermarks & Event Time
+
+Watermarks are the foundation of **event-time processing** in LaminarDB. A watermark is a timestamp that declares: *"all events with timestamps up to this point have been seen."*
+
+### Why watermarks matter
+
+In streaming systems, data can arrive out of order. Watermarks let the engine know when it's safe to:
+- Close time-based windows (e.g., "all data for the 10:00-10:05 window has arrived")
+- Emit aggregation results
+- Detect late-arriving data
+- Advance the pipeline's logical clock
+
+### Emitting watermarks
+
+Use the streaming `Writer` to emit watermarks alongside data:
+
+```python
+import time
+
+conn = laminardb.open(":memory:")
+conn.execute("CREATE SOURCE readings (ts BIGINT, sensor VARCHAR, temp DOUBLE)")
+conn.start()
+
+with conn.writer("readings") as w:
+    # Simulate a timeseries: readings every second
+    for t in range(100):
+        w.insert({
+            "ts": t * 1000,  # millisecond timestamps
+            "sensor": f"sensor_{t % 5}",
+            "temp": 20.0 + (t % 30) * 0.5,
+        })
+
+        # Advance the watermark every 10 events
+        # This tells the engine: "no more events with ts <= this value"
+        if t % 10 == 9:
+            w.watermark(t * 1000)
+            print(f"Watermark advanced to {w.current_watermark}")
+```
+
+### Reading watermarks
+
+Watermarks are visible at every level of the pipeline:
+
+```python
+# Writer-level: current watermark for a specific source
+with conn.writer("readings") as w:
+    w.watermark(5000)
+    print(w.current_watermark)  # 5000
+
+# Source-level: via source metrics
+sm = conn.source_metrics("readings")
+if sm:
+    print(sm.watermark)  # source watermark position
+
+# Stream-level: via stream metrics
+stm = conn.stream_metrics("alerts")
+if stm:
+    print(stm.watermark)  # how far this stream has processed
+
+# Pipeline-level: global watermark (min across all sources)
+print(conn.pipeline_watermark)
+
+# Via PipelineMetrics
+m = conn.metrics()
+print(m.pipeline_watermark)
+```
+
+### Watermark Python type
+
+For application-level watermark tracking:
+
+```python
+from laminardb import Watermark
+
+wm = Watermark(current=5000, lag_ms=200)
+print(wm.current)  # 5000
+print(wm.lag_ms)   # 200 (how far behind real-time)
 ```
 
 ---
@@ -232,7 +571,7 @@ with conn.writer("sensors") as w:
 ### SQL queries
 
 ```python
-# Standard query — collects all results
+# Standard query &mdash; collects all results
 result = conn.query("SELECT * FROM sensors WHERE value > 43.0")
 
 # DuckDB-style alias
@@ -353,69 +692,360 @@ sub.cancel()
 
 ### Named stream subscriptions
 
-Subscribe directly to a named stream with schema access:
+Subscribe directly to a named stream with schema access and timeout support:
 
 ```python
-sub = conn.subscribe_stream("hot_readings")
+sub = conn.subscribe_stream("alerts")
+print(sub.schema)       # pyarrow.Schema of the stream
+print(sub.is_active)    # True
+
+# Blocking with timeout (recommended for most use cases)
+batch = sub.next_timeout(1000)  # wait up to 1000ms, returns None on timeout
+
+# Non-blocking poll
+batch = sub.try_next()  # returns immediately, None if no data
+
+# Blocking (waits indefinitely)
+batch = sub.next()
+
+# Iterator protocol
+for batch in sub:
+    batch.show()
+
+sub.cancel()
+```
+
+### Async stream subscriptions
+
+```python
+sub = await conn.subscribe_stream_async("alerts")
 print(sub.schema)  # pyarrow.Schema
 
-# Blocking with timeout
-batch = sub.next_timeout(1000)  # wait up to 1000ms
-
-# Non-blocking
-batch = sub.try_next()
-
-# Async variant
-sub = await conn.subscribe_stream_async("hot_readings")
 async for batch in sub:
-    process(batch)
+    df = batch.df()
+    await send_to_dashboard(df)
+
+sub.cancel()
 ```
 
 ---
 
-## Materialized Views
+## Streaming Examples
 
-High-level wrapper for working with streaming queries:
+### IoT sensor monitoring
+
+A complete pipeline that ingests sensor readings, detects anomalies, and tracks per-device statistics:
 
 ```python
-from laminardb import MaterializedView, ChangeEvent
+import time
+import threading
+import laminardb
+from laminardb import ChangeEvent
 
-# Set up a stream
-conn.execute("CREATE STREAM hot_readings AS SELECT * FROM sensors WHERE value > 40.0")
+conn = laminardb.open(":memory:")
+
+# ── Define sources ──
+conn.execute("""
+    CREATE SOURCE sensors (
+        ts       BIGINT,
+        device   VARCHAR,
+        temp     DOUBLE,
+        humidity DOUBLE
+    )
+""")
+
+# ── Define streams ──
+# Real-time anomaly detection
+conn.execute("""
+    CREATE STREAM temp_alerts AS
+    SELECT ts, device, temp
+    FROM sensors
+    WHERE temp > 80.0 OR temp < -20.0
+""")
+
+# Per-device running statistics
+conn.execute("""
+    CREATE STREAM device_stats AS
+    SELECT
+        device,
+        COUNT(*)   AS reading_count,
+        AVG(temp)  AS avg_temp,
+        MAX(temp)  AS max_temp,
+        MIN(temp)  AS min_temp
+    FROM sensors
+    GROUP BY device
+""")
+
+# ── Start the pipeline ──
 conn.start()
 
-# Wrap as MaterializedView
-mv = laminardb.mv(conn, "hot_readings", "SELECT * FROM sensors WHERE value > 40.0")
-print(mv.name)     # "hot_readings"
-print(mv.sql)      # "SELECT * FROM sensors WHERE value > 40.0"
-print(mv.schema()) # Schema wrapper around pyarrow.Schema
+# ── Subscribe to alerts ──
+alert_count = 0
 
-# Query current state
-result = mv.query()
-result.show()
-
-# Subscribe with a callback
-def on_change(event: ChangeEvent):
-    print(f"Received {len(event)} changes")
+def on_alert(event: ChangeEvent):
+    global alert_count
     for row in event:
-        print(row["device"], row["value"])
+        alert_count += 1
+        print(f"  ALERT [{row.op}] {row['device']}: temp={row['temp']}")
 
-thread = mv.subscribe(handler=on_change)  # runs in background daemon thread
+mv = laminardb.mv(conn, "temp_alerts")
+alert_thread = mv.subscribe(handler=on_alert)
+
+# ── Ingest sensor data with watermarks ──
+with conn.writer("sensors") as w:
+    for t in range(200):
+        w.insert({
+            "ts": t * 1000,
+            "device": f"device_{t % 5}",
+            "temp": 20.0 + (t % 50) * 1.5,   # some will exceed 80.0
+            "humidity": 40.0 + (t % 20) * 1.0,
+        })
+
+        if t % 50 == 49:
+            w.watermark(t * 1000)
+
+time.sleep(0.5)  # let the pipeline process
+
+# ── Query current state ──
+print("\n=== Device Statistics ===")
+conn.sql("SELECT * FROM device_stats").show()
+
+print(f"\nTotal alerts: {alert_count}")
+
+# ── Observe pipeline health ──
+m = conn.metrics()
+print(f"Pipeline: {m.state}, {m.total_events_ingested} events ingested")
+print(f"Uptime: {m.uptime_secs:.1f}s, watermark: {m.pipeline_watermark}")
+
+conn.close()
 ```
 
-### ChangeEvent and ChangeRow
+### Timeseries analytics
+
+Compute rolling metrics over time-ordered data:
 
 ```python
-def on_change(event: ChangeEvent):
-    print(len(event))        # number of rows
-    df = event.df()          # -> pandas DataFrame
-    table = event.arrow()    # -> pyarrow Table
+import laminardb
 
-    for row in event:
-        print(row.op)        # "Insert", "Delete", "UpdateInsert", "UpdateDelete"
-        print(row["device"]) # dict-style access
-        print(row.keys())    # column names
-        print(row.to_dict()) # full row as dict
+conn = laminardb.open(":memory:")
+
+# ── Source: stock trades ──
+conn.execute("""
+    CREATE SOURCE trades (
+        ts      BIGINT,
+        symbol  VARCHAR,
+        price   DOUBLE,
+        volume  BIGINT
+    )
+""")
+
+# ── Stream: per-symbol price summary ──
+conn.execute("""
+    CREATE STREAM price_summary AS
+    SELECT
+        symbol,
+        COUNT(*)    AS trade_count,
+        AVG(price)  AS avg_price,
+        MAX(price)  AS high,
+        MIN(price)  AS low,
+        SUM(volume) AS total_volume
+    FROM trades
+    GROUP BY symbol
+""")
+
+# ── Stream: high-volume trades ──
+conn.execute("""
+    CREATE STREAM whale_trades AS
+    SELECT ts, symbol, price, volume
+    FROM trades
+    WHERE volume > 10000
+""")
+
+conn.start()
+
+# ── Simulate a trading day ──
+import random
+symbols = ["AAPL", "GOOGL", "MSFT", "AMZN"]
+
+with conn.writer("trades") as w:
+    for t in range(1000):
+        sym = random.choice(symbols)
+        w.insert({
+            "ts": 1700000000 + t,
+            "symbol": sym,
+            "price": round(100 + random.gauss(0, 5), 2),
+            "volume": random.randint(100, 50000),
+        })
+        if t % 100 == 99:
+            w.watermark(1700000000 + t)
+
+# ── Query results ──
+print("=== Price Summary ===")
+conn.sql("SELECT * FROM price_summary").show()
+
+print("\n=== Whale Trades ===")
+conn.sql("SELECT * FROM whale_trades").show(max_rows=10)
+
+# ── Export to pandas for further analysis ──
+df = conn.sql("SELECT * FROM price_summary").df()
+print(f"\nHighest avg price: {df.loc[df['avg_price'].idxmax(), 'symbol']}")
+
+conn.close()
+```
+
+### Multi-source event correlation
+
+Join events from different sources in real time:
+
+```python
+import laminardb
+
+conn = laminardb.open(":memory:")
+
+# ── Two event sources ──
+conn.execute("CREATE SOURCE logins    (ts BIGINT, user_id VARCHAR, ip VARCHAR)")
+conn.execute("CREATE SOURCE purchases (ts BIGINT, user_id VARCHAR, amount DOUBLE)")
+
+# ── Stream: correlate logins with purchases ──
+conn.execute("""
+    CREATE STREAM user_activity AS
+    SELECT
+        l.user_id,
+        l.ip,
+        p.amount,
+        p.ts AS purchase_ts
+    FROM logins l
+    JOIN purchases p ON l.user_id = p.user_id
+""")
+
+# ── Stream: suspicious activity (purchase from new IP) ──
+conn.execute("""
+    CREATE STREAM large_purchases AS
+    SELECT user_id, amount, purchase_ts
+    FROM user_activity
+    WHERE amount > 500.0
+""")
+
+conn.start()
+
+# ── Ingest correlated events ──
+conn.insert("logins", [
+    {"ts": 1, "user_id": "alice", "ip": "1.2.3.4"},
+    {"ts": 2, "user_id": "bob",   "ip": "5.6.7.8"},
+])
+conn.insert("purchases", [
+    {"ts": 3, "user_id": "alice", "amount": 29.99},
+    {"ts": 4, "user_id": "bob",   "amount": 999.00},
+    {"ts": 5, "user_id": "alice", "amount": 750.00},
+])
+
+import time; time.sleep(0.3)
+
+# ── Check results ──
+print("=== User Activity ===")
+conn.sql("SELECT * FROM user_activity").show()
+
+print("\n=== Large Purchases ===")
+conn.sql("SELECT * FROM large_purchases").show()
+
+conn.close()
+```
+
+### Real-time dashboard with async subscriptions
+
+```python
+import asyncio
+import laminardb
+
+async def dashboard():
+    async with laminardb.open(":memory:") as conn:
+        conn.execute("CREATE SOURCE metrics (ts BIGINT, service VARCHAR, latency_ms DOUBLE)")
+        conn.execute("""
+            CREATE STREAM slow_requests AS
+            SELECT * FROM metrics WHERE latency_ms > 500.0
+        """)
+        conn.start()
+
+        # Subscribe to slow requests asynchronously
+        sub = await conn.subscribe_stream_async("slow_requests")
+
+        # Simulate ingestion in a background task
+        async def ingest():
+            import random
+            for t in range(100):
+                conn.insert("metrics", {
+                    "ts": t,
+                    "service": random.choice(["api", "web", "worker"]),
+                    "latency_ms": random.expovariate(1/300) ,  # some will be > 500ms
+                })
+                await asyncio.sleep(0.01)
+
+        asyncio.create_task(ingest())
+
+        # Process alerts as they arrive
+        count = 0
+        async for batch in sub:
+            for row in batch.fetchall():
+                ts, service, latency = row
+                print(f"  Slow request: {service} @ {latency:.0f}ms")
+                count += 1
+            if count >= 5:
+                break
+
+        sub.cancel()
+        print(f"\nDetected {count} slow requests")
+
+asyncio.run(dashboard())
+```
+
+### Producer-consumer with background threads
+
+```python
+import threading
+import time
+import laminardb
+
+conn = laminardb.open(":memory:")
+conn.execute("CREATE SOURCE events (ts BIGINT, type VARCHAR, payload DOUBLE)")
+conn.start()
+
+# ── Producer thread ──
+def produce():
+    with conn.writer("events") as w:
+        for t in range(500):
+            w.insert({"ts": t, "type": f"evt_{t % 3}", "payload": float(t)})
+            if t % 50 == 49:
+                w.watermark(t)
+        print(f"Producer done: {w.current_watermark} final watermark")
+
+# ── Consumer thread ──
+consumed = 0
+
+def consume():
+    global consumed
+    sub = conn.subscribe("SELECT * FROM events")
+    timeout = time.time() + 5.0
+    while time.time() < timeout:
+        batch = sub.try_next()
+        if batch:
+            consumed += batch.num_rows
+    sub.cancel()
+
+producer = threading.Thread(target=produce)
+consumer = threading.Thread(target=consume)
+
+consumer.start()
+producer.start()
+producer.join()
+time.sleep(0.5)
+consumer.join()
+
+print(f"Consumed {consumed} events")
+
+# Check pipeline metrics
+m = conn.metrics()
+print(f"Pipeline: ingested={m.total_events_ingested}, emitted={m.total_events_emitted}")
+conn.close()
 ```
 
 ---
@@ -423,10 +1053,21 @@ def on_change(event: ChangeEvent):
 ## Pipeline Control
 
 ```python
-conn.start()        # start the streaming pipeline
-conn.shutdown()     # graceful shutdown
-conn.checkpoint()   # trigger a checkpoint (returns checkpoint ID)
-conn.cancel_query(query_id)  # cancel a running query
+# Start the streaming pipeline (required before subscriptions receive data)
+conn.start()
+
+# Graceful shutdown (drains in-flight events)
+conn.shutdown()
+
+# Trigger a checkpoint (returns checkpoint ID, or None if disabled)
+checkpoint_id = conn.checkpoint()
+
+# Cancel a specific running query
+conn.cancel_query(query_id)
+
+# Check pipeline state
+print(conn.pipeline_state)         # "running", "stopped", etc.
+print(conn.is_checkpoint_enabled)  # True/False
 ```
 
 ---
@@ -435,14 +1076,14 @@ conn.cancel_query(query_id)  # cancel a running query
 
 ```python
 # List names
-conn.list_tables()   # or conn.tables()
-conn.list_streams()  # or conn.materialized_views()
-conn.list_sinks()
+conn.list_tables()   # or conn.tables()     -> source names
+conn.list_streams()  # or conn.materialized_views() -> stream names
+conn.list_sinks()                            # -> sink names
 
-# Get schema
+# Get a source's schema
 schema = conn.schema("sensors")  # -> pyarrow.Schema
 
-# Detailed catalog info
+# Detailed catalog info with typed objects
 for source in conn.sources():
     print(source.name, source.schema, source.watermark_column)
 
@@ -460,50 +1101,65 @@ for query in conn.queries():
 
 ```python
 stats = conn.stats("sensors")
-print(stats["name"])            # "sensors"
-print(stats["total_events"])    # total ingested events
-print(stats["pending"])         # pending events
-print(stats["capacity"])        # buffer capacity
-print(stats["is_backpressured"])
-print(stats["watermark"])
-print(stats["utilization"])     # buffer utilization %
+print(stats["name"])             # "sensors"
+print(stats["total_events"])     # total ingested events
+print(stats["pending"])          # events in buffer
+print(stats["capacity"])         # buffer capacity
+print(stats["is_backpressured"]) # True if buffer full
+print(stats["watermark"])        # current watermark
+print(stats["utilization"])      # 0.0 - 1.0
 ```
 
 ---
 
-## Pipeline Metrics
+## Pipeline Metrics & Observability
 
-Full observability into the streaming pipeline:
+Full visibility into every component of the streaming pipeline:
 
 ```python
-# Pipeline-wide metrics
+# ── Pipeline-wide metrics ──
 m = conn.metrics()
-print(m.total_events_ingested)
-print(m.total_events_emitted)
-print(m.total_events_dropped)
-print(m.total_cycles)
-print(m.total_batches)
-print(m.uptime_secs)
-print(m.state)                # "running", "stopped", etc.
-print(m.source_count, m.stream_count, m.sink_count)
-print(m.pipeline_watermark)
+print(m.total_events_ingested)   # total rows ingested across all sources
+print(m.total_events_emitted)    # total rows emitted by streams
+print(m.total_events_dropped)    # dropped events (backpressure, errors)
+print(m.total_cycles)            # pipeline processing cycles
+print(m.total_batches)           # batches processed
+print(m.uptime_secs)             # pipeline uptime in seconds
+print(m.state)                   # "running", "stopped", etc.
+print(m.source_count)            # registered sources
+print(m.stream_count)            # registered streams
+print(m.sink_count)              # registered sinks
+print(m.pipeline_watermark)      # global watermark (min across sources)
 
-# Per-source metrics
+# ── Per-source metrics ──
 for sm in conn.all_source_metrics():
-    print(sm.name, sm.total_events, sm.pending, sm.utilization)
+    print(f"  {sm.name}: {sm.total_events} events, "
+          f"{sm.utilization:.0%} buffer, wm={sm.watermark}")
 
-sm = conn.source_metrics("sensors")  # specific source, or None
-
-# Per-stream metrics
+# ── Per-stream metrics ──
 for stm in conn.all_stream_metrics():
-    print(stm.name, stm.total_events, stm.sql)
+    print(f"  {stm.name}: {stm.total_events} emitted, "
+          f"wm={stm.watermark}, sql={stm.sql}")
 
-# Pipeline topology (DAG)
+# ── Pipeline topology (DAG visualization) ──
 topo = conn.topology()
 for node in topo.nodes:
-    print(node.name, node.node_type, node.sql)
+    print(f"  [{node.node_type}] {node.name}")
+    if node.sql:
+        print(f"    SQL: {node.sql}")
 for edge in topo.edges:
-    print(f"{edge.from_node} -> {edge.to_node}")
+    print(f"  {edge.from_node} --> {edge.to_node}")
+```
+
+### Metrics Python wrapper
+
+```python
+from laminardb import Metrics
+
+metrics = Metrics(conn.metrics())
+print(metrics.events_per_second)   # calculated throughput
+print(metrics.uptime_secs)         # pipeline uptime
+print(metrics.state)               # pipeline state string
 ```
 
 ---
@@ -582,7 +1238,10 @@ conn = laminardb.open(":memory:", config=config)
 High-level Python wrappers in `laminardb.types`:
 
 ```python
-from laminardb import Schema, Column, TableStats, Watermark, CheckpointStatus, Metrics
+from laminardb import (
+    Schema, Column, TableStats, Watermark,
+    CheckpointStatus, Metrics, ChangeRow, ChangeEvent, MaterializedView,
+)
 ```
 
 | Type | Description |
@@ -590,12 +1249,12 @@ from laminardb import Schema, Column, TableStats, Watermark, CheckpointStatus, M
 | `Column(name, type, nullable)` | Frozen dataclass for column metadata |
 | `Schema` | Wraps `pyarrow.Schema` with `columns`, `names`, indexing by name/position |
 | `TableStats(row_count, size_bytes)` | Frozen dataclass |
-| `Watermark(current, lag_ms)` | Frozen dataclass |
+| `Watermark(current, lag_ms)` | Frozen dataclass for watermark state |
 | `CheckpointStatus(checkpoint_id, enabled)` | Frozen dataclass |
-| `Metrics` | Wrapper around `PipelineMetrics` with `events_per_second`, `uptime_secs`, `state` |
+| `Metrics` | Wrapper with `events_per_second`, `uptime_secs`, `state` |
 | `ChangeRow` | Dict-like row with `.op`, `["col"]`, `.keys()`, `.to_dict()` |
 | `ChangeEvent` | Iterable batch of `ChangeRow`s with `.df()`, `.arrow()`, `.pl()` |
-| `MaterializedView` | High-level stream wrapper with `.query()`, `.subscribe()`, `.schema()` |
+| `MaterializedView` | Stream wrapper with `.query()`, `.subscribe(handler=)`, `.schema()` |
 
 ---
 
@@ -645,8 +1304,6 @@ IDEs like VS Code and PyCharm provide full autocompletion out of the box.
 
 ### Benchmarks
 
-Run the included benchmarks:
-
 ```bash
 python benchmarks/bench_ingestion.py   # ingestion throughput by format
 python benchmarks/bench_query.py       # query + conversion throughput
@@ -655,16 +1312,7 @@ python benchmarks/bench_streaming.py   # subscription iteration throughput
 
 ---
 
-## Examples
-
-```bash
-python examples/quickstart.py            # DuckDB-style API walkthrough
-python examples/streaming_analytics.py   # MaterializedView + ChangeEvent pattern
-```
-
----
-
-## API Aliases
+## API Aliases (DuckDB Compatibility)
 
 For users coming from DuckDB:
 
@@ -728,14 +1376,14 @@ src/                       # Rust source (PyO3 bindings)
   connection.rs            # Connection class (40+ methods)
   query.rs                 # QueryResult class
   conversion.rs            # Python <-> Arrow type conversion
-  writer.rs                # Streaming writer
+  writer.rs                # Streaming writer with watermark support
   subscription.rs          # Sync subscription iterator
   async_support.rs         # Tokio runtime + async subscription
   stream_subscription.rs   # Named stream subscriptions (sync + async)
   execute.rs               # ExecuteResult for DDL/DML introspection
-  error.rs                 # Exception hierarchy
+  error.rs                 # Exception hierarchy with error codes
   config.rs                # LaminarConfig
-  catalog.rs               # Catalog info classes
+  catalog.rs               # Catalog info (SourceInfo, SinkInfo, StreamInfo, QueryInfo)
   metrics.rs               # Pipeline topology and metrics
 tests/                     # pytest test suite (15 files, 233+ tests)
 benchmarks/                # Performance benchmarks
