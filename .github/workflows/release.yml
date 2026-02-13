@@ -45,8 +45,6 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-          - os: ubuntu-latest
-            target: aarch64
           - os: macos-13
             target: x86_64
           - os: macos-latest
@@ -69,7 +67,11 @@ jobs:
           manylinux: "2_28"
           before-script-linux: |
             # Install clang/libclang for bindgen (needed by rocksdb)
-            yum install -y clang-devel || apt-get update && apt-get install -y libclang-dev
+            if command -v yum &> /dev/null; then
+              yum install -y clang-devel
+            elif command -v apt-get &> /dev/null; then
+              apt-get update && apt-get install -y libclang-dev
+            fi
             # Ensure the monorepo exists inside the container
             if [ ! -d "laminardb" ]; then
               git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
