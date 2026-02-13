@@ -1,0 +1,25 @@
+[project]
+name = "laminardb-demo"
+version = "0.1.0"
+description = "LaminarDB Python demo — real-time quantitative trading analytics"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "laminardb",
+]
+
+[project.optional-dependencies]
+full = [
+    "pandas>=2.0",
+    "polars>=1.0",
+    "rich>=13.0",
+    "plotly>=5.0",
+    "scipy>=1.11",
+    "numpy>=1.26",
+    "jupyterlab>=4.0",
+]
+
+[project.scripts]
+laminardb-quickstart = "quickstart:main"
+laminardb-signals = "trading_signals:main"
+laminardb-risk = "portfolio_risk:main"
