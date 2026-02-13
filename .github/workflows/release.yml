@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone laminardb monorepo
-        run: git clone --depth 1 https://github.com/laminardb/laminardb.git ../laminardb
+        run: git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
       - name: Extract tag version
         id: tag
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone laminardb monorepo
-        run: git clone --depth 1 https://github.com/laminardb/laminardb.git ../laminardb
+        run: git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -67,6 +67,11 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist
           manylinux: "2_28"
+          before-script-linux: |
+            # Inside the manylinux Docker container, the monorepo must also exist
+            if [ ! -d "laminardb" ]; then
+              git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
+            fi
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
@@ -79,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone laminardb monorepo
-        run: git clone --depth 1 https://github.com/laminardb/laminardb.git ../laminardb
+        run: git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:

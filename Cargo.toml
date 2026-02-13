@@ -22,8 +22,8 @@ arrow-schema = "57"
 arrow-json = "57"
 arrow-csv = "57"
 
-laminar-db = { path = "../laminardb/crates/laminar-db", package = "laminar-db", features = ["api"] }
-laminar-core = { path = "../laminardb/crates/laminar-core", package = "laminar-core" }
+laminar-db = { path = "laminardb/crates/laminar-db", package = "laminar-db", features = ["api"] }
+laminar-core = { path = "laminardb/crates/laminar-core", package = "laminar-core" }
 
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
