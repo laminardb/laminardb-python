@@ -8,8 +8,7 @@ version = "0.12.0"
 description = "Python bindings for LaminarDB streaming SQL database"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
-license-files = ["LICENSE"]
+license = {text = "MIT"}
 authors = [{ name = "LaminarDB Contributors" }]
 keywords = ["database", "streaming", "sql", "arrow", "dataframe", "stream-processing"]
 classifiers = [
