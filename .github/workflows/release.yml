@@ -45,8 +45,6 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-          - os: macos-13
-            target: x86_64
           - os: macos-latest
             target: aarch64
           - os: windows-latest
