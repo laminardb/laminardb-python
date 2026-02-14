@@ -409,6 +409,42 @@ conn.execute("""
 """)
 ```
 
+### Windowed aggregations
+
+LaminarDB supports time-based window functions in streaming SQL. Use them in `GROUP BY` clauses to aggregate data over sliding or fixed time intervals.
+
+```python
+# Tumbling window — fixed, non-overlapping 5-second intervals
+conn.execute("""
+    CREATE STREAM avg_temp_5s AS
+    SELECT device, AVG(value) AS avg_value, COUNT(*) AS cnt
+    FROM sensors
+    GROUP BY device, TUMBLE(ts, 5000)
+""")
+
+# Hopping window — 5-second windows that advance every 2.5 seconds (overlapping)
+conn.execute("""
+    CREATE STREAM avg_temp_hop AS
+    SELECT device, AVG(value) AS avg_value, COUNT(*) AS cnt
+    FROM sensors
+    GROUP BY device, HOPPING(ts, 5000, 2500)
+""")
+
+# Session window — groups events within 10-second inactivity gaps
+conn.execute("""
+    CREATE STREAM session_stats AS
+    SELECT device, AVG(value) AS avg_value, COUNT(*) AS cnt
+    FROM sensors
+    GROUP BY device, SESSION(ts, 10000)
+""")
+```
+
+| Window Type | Syntax | Behavior |
+|-------------|--------|----------|
+| **TUMBLE** | `TUMBLE(ts_col, size_ms)` | Fixed, non-overlapping windows |
+| **HOPPING** | `HOPPING(ts_col, size_ms, hop_ms)` | Fixed windows that advance by hop interval (windows overlap when hop < size) |
+| **SESSION** | `SESSION(ts_col, gap_ms)` | Dynamic windows that close after an inactivity gap |
+
 ### Discovering streams
 
 ```python
