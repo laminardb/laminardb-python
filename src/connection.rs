@@ -222,7 +222,7 @@ impl PyConnection {
         })
     }
 
-    /// Get the schema of a source as a PyArrow Schema.
+    /// Get the schema of a source or stream as a PyArrow Schema.
     fn schema(&self, py: Python<'_>, table: &str) -> PyResult<Py<PyAny>> {
         self.check_closed()?;
         let inner = self.inner.clone();
@@ -230,7 +230,32 @@ impl PyConnection {
         let schema: SchemaRef = py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            conn.get_schema(&table).into_pyresult()
+            // Try source first, then fall back to stream SQL definition.
+            match conn.get_schema(&table) {
+                Ok(s) => Ok(s),
+                Err(_) => {
+                    // Look up the stream's SQL and execute it to get the schema.
+                    let stream_sql = conn
+                        .stream_info()
+                        .into_iter()
+                        .find(|s| s.name == table)
+                        .and_then(|s| s.sql);
+                    match stream_sql {
+                        Some(sql) => {
+                            let result = conn.execute(&sql).into_pyresult()?;
+                            match result {
+                                laminar_db::api::ExecuteResult::Query(mut stream) => {
+                                    let schema = stream.schema();
+                                    stream.cancel();
+                                    Ok(schema)
+                                }
+                                _ => conn.get_schema(&table).into_pyresult(),
+                            }
+                        }
+                        None => conn.get_schema(&table).into_pyresult(),
+                    }
+                }
+            }
         })?;
         let py_schema = PySchema::from(schema);
         let obj = py_schema.into_pyarrow(py)?;
@@ -637,6 +662,57 @@ impl PyConnection {
     ) -> PyResult<Bound<'py, PyAny>> {
         self.close(py)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async { Ok(false) })
+    }
+
+    /// Query a named stream by re-executing its SQL definition.
+    ///
+    /// Streams are not registered as DataFusion tables, so `SELECT * FROM
+    /// stream_name` does not work.  This method looks up the stream's SQL
+    /// from the catalog and runs it as a batch query, optionally wrapping
+    /// it in a `WHERE` clause.
+    #[pyo3(signature = (name, filter = None))]
+    fn query_stream(
+        &self,
+        py: Python<'_>,
+        name: &str,
+        filter: Option<&str>,
+    ) -> PyResult<QueryResult> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let name = name.to_owned();
+        let filter = filter.map(|f| f.to_owned());
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            let stream_sql = conn
+                .stream_info()
+                .into_iter()
+                .find(|s| s.name == name)
+                .and_then(|s| s.sql)
+                .ok_or_else(|| QueryError::new_err(format!("Stream not found: {}", name)))?;
+            let sql = match filter {
+                Some(f) => format!("SELECT * FROM ({}) AS {} WHERE {}", stream_sql, name, f),
+                None => stream_sql,
+            };
+            let result = conn.execute(&sql).into_pyresult()?;
+            match result {
+                laminar_db::api::ExecuteResult::Query(mut stream) => {
+                    let schema = stream.schema();
+                    let mut batches = Vec::new();
+                    while let Some(batch) = stream.next().into_pyresult()? {
+                        batches.push(batch);
+                    }
+                    Ok(QueryResult::new(batches, schema))
+                }
+                laminar_db::api::ExecuteResult::Metadata(batch) => {
+                    Ok(QueryResult::from_batch(batch))
+                }
+                _ => Err(QueryError::new_err(format!(
+                    "Expected query result for stream: {}",
+                    name
+                ))),
+            }
+        })
     }
 
     // ── DuckDB-style aliases ──

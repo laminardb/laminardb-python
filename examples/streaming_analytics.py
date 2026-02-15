@@ -6,21 +6,21 @@ Run: python examples/streaming_analytics.py
 """
 
 import time
-import threading
 
 import laminardb
-from laminardb import MaterializedView, ChangeEvent
+from laminardb import ChangeEvent
 
 # ── Setup ──
 conn = laminardb.open(":memory:")
 conn.execute("CREATE SOURCE readings (ts BIGINT, sensor VARCHAR, temp DOUBLE)")
-conn.start()
 
-# ── Create a stream (materialized view) ──
+# ── Create a stream (materialized view) ── must be before start()
 conn.execute(
     "CREATE STREAM hot_readings AS "
     "SELECT * FROM readings WHERE temp > 40.0"
 )
+
+conn.start()
 
 # ── Wrap as a MaterializedView for convenience ──
 mv = laminardb.mv(conn, "hot_readings", "SELECT * FROM readings WHERE temp > 40.0")

@@ -238,16 +238,16 @@ class MaterializedView:
     def query(self, where: str = "") -> Any:
         """Query the materialized view.
 
+        Re-executes the stream's SQL definition as a snapshot query
+        against the current source data.
+
         Args:
             where: Optional WHERE clause (without the WHERE keyword).
 
         Returns:
             QueryResult from the query.
         """
-        sql = f"SELECT * FROM {self._name}"
-        if where:
-            sql += f" WHERE {where}"
-        return self._conn.sql(sql)
+        return self._conn.query_stream(self._name, where or None)
 
     def schema(self) -> Schema:
         """Get the schema of this materialized view."""
