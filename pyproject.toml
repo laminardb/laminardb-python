@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "laminardb"
-version = "0.13.1"
+version = "0.13.2"
 description = "Python bindings for LaminarDB streaming SQL database"
 readme = "README.md"
 requires-python = ">=3.11"
