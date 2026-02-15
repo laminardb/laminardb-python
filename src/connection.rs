@@ -318,7 +318,7 @@ impl PyConnection {
         py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            conn.checkpoint().into_pyresult()
+            conn.checkpoint().into_pyresult().map(Some)
         })
     }
 
