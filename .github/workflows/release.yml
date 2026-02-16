@@ -64,11 +64,12 @@ jobs:
           args: --release --out dist
           manylinux: "2_28"
           before-script-linux: |
-            # Install clang/libclang for bindgen (needed by rocksdb)
+            # Install build dependencies for rdkafka (cmake, ssl, curl, sasl) and rocksdb (clang)
             if command -v yum &> /dev/null; then
-              yum install -y clang-devel
+              yum install -y cmake3 clang-devel pkgconfig openssl-devel libcurl-devel cyrus-sasl-devel zlib-devel
+              ln -sf /usr/bin/cmake3 /usr/bin/cmake || true
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y libclang-dev
+              apt-get update && apt-get install -y cmake pkg-config libclang-dev zlib1g-dev libcurl4-openssl-dev libsasl2-dev
             fi
             # Ensure the monorepo exists inside the container
             if [ ! -d "laminardb" ]; then
