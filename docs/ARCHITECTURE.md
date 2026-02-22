@@ -30,6 +30,16 @@
 │  │subscription.rs │ │ async_support.rs      │       │
 │  │ Continuous Qs  │ │ Tokio + asyncio       │       │
 │  └────────────────┘ └───────────────────────┘       │
+│                                                      │
+│  ┌──────────────────────┐ ┌──────────────┐          │
+│  │stream_subscription.rs│ │ execute.rs   │          │
+│  │ Named stream subs    │ │ DDL/DML      │          │
+│  └──────────────────────┘ └──────────────┘          │
+│                                                      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────┐        │
+│  │config.rs │ │catalog.rs│ │ metrics.rs   │        │
+│  │ Config   │ │ Catalog  │ │ Topology     │        │
+│  └──────────┘ └──────────┘ └──────────────┘        │
 └──────────────────────┬──────────────────────────────┘
                        │  Rust crate API
 ┌──────────────────────▼──────────────────────────────┐
@@ -50,6 +60,11 @@
 | `query.rs` | `QueryResult` pyclass with multi-format export |
 | `subscription.rs` | `Subscription` pyclass for continuous queries (sync) |
 | `async_support.rs` | Tokio runtime, `AsyncSubscription` for asyncio |
+| `stream_subscription.rs` | `StreamSubscription` + `AsyncStreamSubscription` for named streams |
+| `execute.rs` | `ExecuteResult` pyclass for DDL/DML introspection |
+| `config.rs` | `LaminarConfig` pyclass for database configuration |
+| `catalog.rs` | `SourceInfo`, `SinkInfo`, `StreamInfo`, `QueryInfo` catalog types |
+| `metrics.rs` | `PipelineMetrics`, `PipelineTopology`, per-source/stream metrics |
 
 ## Data Flow
 
@@ -94,7 +109,10 @@ LaminarError (base)
 ├── QueryError         ← ApiError::Query
 ├── IngestionError     ← ApiError::Ingestion
 ├── SchemaError        ← ApiError::Schema
-└── SubscriptionError  ← ApiError::Subscription
+├── SubscriptionError  ← ApiError::Subscription
+├── StreamError        ← stream/materialized view failures
+├── CheckpointError    ← checkpoint operation failures
+└── ConnectorError     ← connector operation failures
 ```
 
 Core errors are mapped 1:1 to Python exceptions via `IntoPyResult` trait.

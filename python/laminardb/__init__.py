@@ -74,10 +74,13 @@ from laminardb._laminardb import (
 from laminardb.types import (
     ChangeEvent,
     ChangeRow,
+    CheckpointStatus,
     Column,
     MaterializedView,
     Metrics,
     Schema,
+    TableStats,
+    Watermark,
 )
 
 # ---------------------------------------------------------------------------
@@ -170,7 +173,10 @@ __all__ = [
     "Column",
     "ChangeEvent",
     "ChangeRow",
+    "CheckpointStatus",
     "Metrics",
+    "TableStats",
+    "Watermark",
     # Catalog info
     "SourceInfo",
     "SinkInfo",

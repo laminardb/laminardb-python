@@ -444,6 +444,8 @@ conn.execute("""
 | **HOPPING** | `HOPPING(ts_col, size_ms, hop_ms)` | Fixed windows that advance by hop interval (windows overlap when hop < size) |
 | **SESSION** | `SESSION(ts_col, gap_ms)` | Dynamic windows that close after an inactivity gap |
 
+> **Note:** Both integer millisecond syntax (`TUMBLE(ts, 5000)`) and SQL INTERVAL syntax (`tumble(ts, INTERVAL '5' SECOND)`) are supported. The Rust engine normalizes both forms.
+
 ### Discovering streams
 
 ```python
@@ -534,7 +536,7 @@ LaminarDB supports external source and sink connectors for integrating with exte
 | PostgreSQL | -- | yes | `postgres-sink` |
 | MySQL CDC | yes | -- | `mysql-cdc` |
 | Delta Lake | yes | yes | `delta-lake` |
-| Apache Iceberg | -- | yes | `delta-lake` |
+| Apache Iceberg | -- | yes | `iceberg` |
 
 ### Kafka
 
@@ -1387,15 +1389,22 @@ from laminardb import codes
 
 codes.CONNECTION_FAILED     # 100
 codes.CONNECTION_CLOSED     # 101
+codes.CONNECTION_IN_USE     # 102
 codes.TABLE_NOT_FOUND       # 200
 codes.TABLE_EXISTS          # 201
 codes.SCHEMA_MISMATCH       # 202
+codes.INVALID_SCHEMA        # 203
 codes.INGESTION_FAILED      # 300
 codes.WRITER_CLOSED         # 301
+codes.BATCH_SCHEMA_MISMATCH # 302
 codes.QUERY_FAILED          # 400
 codes.SQL_PARSE_ERROR       # 401
+codes.QUERY_CANCELLED       # 402
 codes.SUBSCRIPTION_FAILED   # 500
+codes.SUBSCRIPTION_CLOSED   # 501
+codes.SUBSCRIPTION_TIMEOUT  # 502
 codes.INTERNAL_ERROR        # 900
+codes.SHUTDOWN              # 901
 ```
 
 ---

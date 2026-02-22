@@ -108,4 +108,4 @@ with db.writer("sensors") as w:
 5. All `#[pyclass]` types are `Send + Sync` for free-threaded Python
 6. Custom exceptions provide actionable error messages
 7. Type stubs pass `mypy --strict`
-8. CI runs on Python 3.10–3.13 with all tests passing
+8. CI runs on Python 3.11–3.13 with all tests passing

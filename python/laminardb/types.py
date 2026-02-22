@@ -65,6 +65,35 @@ class Schema:
 
 
 # ---------------------------------------------------------------------------
+# TableStats & Watermark & CheckpointStatus
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TableStats:
+    """Statistics for a source table."""
+
+    row_count: int
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class Watermark:
+    """Watermark state for a source or stream."""
+
+    current: int
+    lag_ms: int = 0
+
+
+@dataclass(frozen=True)
+class CheckpointStatus:
+    """Status of the checkpoint system."""
+
+    checkpoint_id: int | None
+    enabled: bool
+
+
+# ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
 
