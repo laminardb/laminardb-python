@@ -222,3 +222,26 @@ class TestMaterializedView:
         assert isinstance(schema, Schema)
         assert "id" in schema.names
         conn.close()
+
+    @requires_pyarrow
+    def test_schema_on_stream(self, tmp_path):
+        """mv.schema() should work on streams, not just tables."""
+        conn = laminardb.open(str(tmp_path / "mv_stream_schema.db"))
+        conn.execute(
+            "CREATE SOURCE sensors ("
+            "  ts BIGINT NOT NULL,"
+            "  device VARCHAR NOT NULL,"
+            "  value DOUBLE NOT NULL"
+            ")"
+        )
+        conn.execute(
+            "CREATE STREAM high_val AS "
+            "SELECT * FROM sensors WHERE value > 100.0"
+        )
+        conn.execute("CREATE SINK out FROM high_val")
+        conn.start()
+        mv = MaterializedView(conn, "high_val")
+        schema = mv.schema()
+        assert isinstance(schema, Schema)
+        assert "device" in schema.names
+        conn.close()

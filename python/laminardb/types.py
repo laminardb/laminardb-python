@@ -253,7 +253,13 @@ class MaterializedView:
 
     def schema(self) -> Schema:
         """Get the schema of this materialized view."""
-        arrow_schema = self._conn.schema(self._name)
+        try:
+            arrow_schema = self._conn.schema(self._name)
+        except Exception:
+            # conn.schema() uses DataFusion catalog which may not contain
+            # streams.  Fall back to querying the stream for its schema.
+            result = self._conn.sql(f"SELECT * FROM {self._name} LIMIT 0")
+            arrow_schema = result.schema
         return Schema(arrow_schema)
 
     def subscribe(
