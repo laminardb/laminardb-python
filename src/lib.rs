@@ -11,6 +11,7 @@
 
 mod async_support;
 mod catalog;
+mod checkpoint;
 mod config;
 mod connection;
 mod conversion;
@@ -44,6 +45,9 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<stream_subscription::AsyncStreamSubscription>()?;
     m.add_class::<execute::ExecuteResult>()?;
     m.add_class::<config::PyLaminarConfig>()?;
+
+    // Checkpoint
+    m.add_class::<checkpoint::PyCheckpointResult>()?;
 
     // Catalog info classes
     m.add_class::<catalog::PySourceInfo>()?;

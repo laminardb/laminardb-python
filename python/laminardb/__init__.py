@@ -40,6 +40,7 @@ from laminardb._laminardb import (
     AsyncStreamSubscription,
     AsyncSubscription,
     CheckpointError,
+    CheckpointResult,
     Connection,
     ConnectionError,
     ConnectorError,
@@ -155,6 +156,7 @@ __all__ = [
     "execute",
     "mv",
     # Core classes
+    "CheckpointResult",
     "Connection",
     "ExecuteResult",
     "LaminarConfig",

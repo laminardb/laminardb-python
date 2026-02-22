@@ -87,7 +87,12 @@ class Watermark:
 
 @dataclass(frozen=True)
 class CheckpointStatus:
-    """Status of the checkpoint system."""
+    """Status of the checkpoint system.
+
+    .. deprecated::
+        Use :class:`laminardb.CheckpointResult` returned by
+        ``Connection.checkpoint()`` instead.
+    """
 
     checkpoint_id: int | None
     enabled: bool

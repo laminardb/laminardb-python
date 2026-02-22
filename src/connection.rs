@@ -13,6 +13,7 @@ use pyo3_arrow::PySchema;
 
 use crate::async_support::{AsyncSubscription, runtime};
 use crate::catalog::{PyQueryInfo, PySinkInfo, PySourceInfo, PyStreamInfo};
+use crate::checkpoint::PyCheckpointResult;
 use crate::conversion;
 use crate::error::{ConnectionError, IntoPyResult, QueryError};
 use crate::execute::ExecuteResult;
@@ -336,15 +337,16 @@ impl PyConnection {
         self.closed
     }
 
-    /// Trigger a checkpoint. Returns the checkpoint ID on success, or None.
-    fn checkpoint(&self, py: Python<'_>) -> PyResult<Option<u64>> {
+    /// Trigger a checkpoint. Returns a CheckpointResult on success.
+    fn checkpoint(&self, py: Python<'_>) -> PyResult<PyCheckpointResult> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        let id = py.allow_threads(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
-            conn.checkpoint().into_pyresult().map(Some)
-        })
+            conn.checkpoint().into_pyresult()
+        })?;
+        Ok(PyCheckpointResult::from_id(id))
     }
 
     /// Whether checkpointing is enabled for this connection.
