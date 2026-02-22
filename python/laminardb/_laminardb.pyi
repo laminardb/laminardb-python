@@ -619,6 +619,18 @@ class AsyncStreamSubscription:
         """The subscription schema as a PyArrow Schema."""
         ...
 
+    def next(self) -> QueryResult | None:
+        """Blocking wait for the next batch."""
+        ...
+
+    def next_timeout(self, timeout_ms: int) -> QueryResult | None:
+        """Blocking wait for the next batch with a timeout in milliseconds."""
+        ...
+
+    def try_next(self) -> QueryResult | None:
+        """Non-blocking poll for the next batch."""
+        ...
+
     def cancel(self) -> None:
         """Cancel the subscription."""
         ...

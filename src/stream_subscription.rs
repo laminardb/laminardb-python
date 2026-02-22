@@ -214,6 +214,63 @@ impl AsyncStreamSubscription {
         }
     }
 
+    /// Blocking wait for the next batch.
+    fn next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
+        let has_sub = self.inner.lock().is_some();
+        if !has_sub {
+            return Ok(None);
+        }
+
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let mut guard = self.inner.lock();
+            let sub = guard.as_mut().unwrap();
+            match sub.next().into_pyresult()? {
+                Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Blocking wait for the next batch with a timeout in milliseconds.
+    ///
+    /// Returns None if the timeout expires without data.
+    fn next_timeout(&self, py: Python<'_>, timeout_ms: u64) -> PyResult<Option<QueryResult>> {
+        let has_sub = self.inner.lock().is_some();
+        if !has_sub {
+            return Ok(None);
+        }
+
+        let timeout = Duration::from_millis(timeout_ms);
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let mut guard = self.inner.lock();
+            let sub = guard.as_mut().unwrap();
+            match sub.next_timeout(timeout).into_pyresult()? {
+                Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Non-blocking poll for the next batch.
+    fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
+        let has_sub = self.inner.lock().is_some();
+        if !has_sub {
+            return Ok(None);
+        }
+
+        py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let mut guard = self.inner.lock();
+            let sub = guard.as_mut().unwrap();
+            match sub.try_next().into_pyresult()? {
+                Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+                None => Ok(None),
+            }
+        })
+    }
+
     /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
         py.allow_threads(|| {

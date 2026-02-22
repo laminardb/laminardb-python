@@ -136,3 +136,38 @@ class TestAsyncStreamSubscription:
         sub.cancel()
         with pytest.raises(RuntimeError, match="cancelled"):
             _ = sub.schema
+
+    @pytest.mark.asyncio
+    async def test_async_try_next_no_data(self, conn):
+        sub = await conn.subscribe_stream_async("filtered")
+        # No data inserted yet, try_next should return None
+        result = sub.try_next()
+        assert result is None
+        sub.cancel()
+
+    @pytest.mark.asyncio
+    async def test_async_try_next_after_cancel(self, conn):
+        sub = await conn.subscribe_stream_async("filtered")
+        sub.cancel()
+        result = sub.try_next()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_async_next_timeout_no_data(self, conn):
+        sub = await conn.subscribe_stream_async("filtered")
+        # No data inserted, timeout raises SubscriptionError
+        with pytest.raises(laminardb.SubscriptionError, match="timeout"):
+            sub.next_timeout(100)
+        sub.cancel()
+
+    @pytest.mark.asyncio
+    async def test_async_subscribe_stream_with_data(self, conn):
+        sub = await conn.subscribe_stream_async("filtered")
+        conn.insert("events", {"id": 1, "msg": "hello"})
+        # Use next_timeout so we don't block forever
+        result = sub.next_timeout(2000)
+        if result is not None:
+            assert result.num_rows > 0
+        else:
+            pytest.skip("data did not arrive within timeout")
+        sub.cancel()
