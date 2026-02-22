@@ -118,6 +118,22 @@ class LaminarConfig:
     def __repr__(self) -> str: ...
 
 # ---------------------------------------------------------------------------
+# CheckpointResult
+# ---------------------------------------------------------------------------
+
+class CheckpointResult:
+    """The result of a checkpoint operation."""
+
+    @property
+    def checkpoint_id(self) -> int:
+        """The checkpoint ID assigned by the database."""
+        ...
+
+    def __bool__(self) -> bool: ...
+    def __int__(self) -> int: ...
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
 # ExecuteResult
 # ---------------------------------------------------------------------------
 
@@ -282,8 +298,8 @@ class Connection:
         """Start the streaming pipeline."""
         ...
 
-    def checkpoint(self) -> int | None:
-        """Trigger a checkpoint. Returns the checkpoint ID or None."""
+    def checkpoint(self) -> CheckpointResult:
+        """Trigger a checkpoint. Returns a CheckpointResult."""
         ...
 
     def execute(self, sql: str) -> ExecuteResult:
