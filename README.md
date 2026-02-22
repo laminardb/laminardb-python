@@ -229,7 +229,6 @@ conn = laminardb.connect("laminar://localhost:5432/mydb")
 config = laminardb.LaminarConfig(
     buffer_size=131072,
     checkpoint_interval_ms=5000,
-    table_spill_threshold=2_000_000,
 )
 conn = laminardb.open(":memory:", config=config)
 ```
@@ -517,6 +516,155 @@ for sink in conn.sinks():
     print(sink.name)  # "output_sink"
 
 print(conn.sink_count)  # 1
+```
+
+---
+
+## External Connectors
+
+LaminarDB supports external source and sink connectors for integrating with external systems. Connectors are created via SQL `CREATE SOURCE` and `CREATE SINK` statements.
+
+### Available Connectors
+
+| Connector | Source | Sink | Feature Flag |
+|-----------|--------|------|-------------|
+| Kafka | yes | yes | `kafka` |
+| WebSocket | yes | yes | `websocket` |
+| PostgreSQL CDC | yes | -- | `postgres-cdc` |
+| PostgreSQL | -- | yes | `postgres-sink` |
+| MySQL CDC | yes | -- | `mysql-cdc` |
+| Delta Lake | yes | yes | `delta-lake` |
+| Apache Iceberg | -- | yes | `delta-lake` |
+
+### Kafka
+
+```python
+# Kafka source — consume from a topic
+conn.execute("""
+    CREATE SOURCE trades (symbol VARCHAR, price DOUBLE, volume BIGINT, ts TIMESTAMP)
+    WITH (
+        connector = 'kafka',
+        'bootstrap.servers' = 'localhost:9092',
+        'topic' = 'market-trades',
+        'group.id' = 'laminardb-consumer',
+        'auto.offset.reset' = 'earliest',
+        'format' = 'json'
+    )
+""")
+
+# Kafka sink — publish query results to a topic
+conn.execute("""
+    CREATE SINK alerts AS
+        SELECT symbol, price FROM trades WHERE price > 1000
+    WITH (
+        connector = 'kafka',
+        'bootstrap.servers' = 'localhost:9092',
+        'topic' = 'price-alerts',
+        'format' = 'json'
+    )
+""")
+```
+
+### WebSocket
+
+```python
+# WebSocket source (client mode) — connect to a market data feed
+conn.execute("""
+    CREATE SOURCE prices (symbol VARCHAR, bid DOUBLE, ask DOUBLE, ts TIMESTAMP)
+    WITH (
+        connector = 'websocket',
+        'url' = 'wss://feed.example.com/prices',
+        'format' = 'json',
+        'reconnect.enabled' = 'true',
+        'reconnect.max.delay.ms' = '30000'
+    )
+""")
+
+# WebSocket sink (server mode) — fan out results to dashboard clients
+conn.execute("""
+    CREATE SINK dashboard AS
+        SELECT symbol, AVG(bid) as avg_bid FROM prices
+        GROUP BY symbol, TUMBLE(ts, INTERVAL '5 seconds')
+    WITH (
+        connector = 'websocket',
+        'mode' = 'server',
+        'bind.address' = '0.0.0.0:8080',
+        'format' = 'json',
+        'slow.client.policy' = 'drop_oldest'
+    )
+""")
+```
+
+### PostgreSQL CDC
+
+```python
+# Capture changes from a PostgreSQL table via logical replication
+conn.execute("""
+    CREATE SOURCE users (id BIGINT, name VARCHAR, email VARCHAR, updated_at TIMESTAMP)
+    WITH (
+        connector = 'postgres-cdc',
+        'connection' = 'postgresql://user:pass@localhost:5432/mydb',
+        'table' = 'public.users',
+        'slot.name' = 'laminardb_slot'
+    )
+""")
+```
+
+### MySQL CDC
+
+```python
+# Capture changes from a MySQL table via binary log replication
+conn.execute("""
+    CREATE SOURCE orders (id BIGINT, product VARCHAR, quantity INT, created_at TIMESTAMP)
+    WITH (
+        connector = 'mysql-cdc',
+        'connection' = 'mysql://user:pass@localhost:3306/mydb',
+        'table' = 'orders',
+        'server.id' = '12345'
+    )
+""")
+```
+
+### Delta Lake
+
+```python
+# Delta Lake source — poll for new versions
+conn.execute("""
+    CREATE SOURCE inventory (id BIGINT, sku VARCHAR, quantity INT)
+    WITH (
+        connector = 'delta-lake',
+        'table_uri' = 's3://my-bucket/warehouse/inventory',
+        'poll_interval_ms' = '5000'
+    )
+""")
+
+# Delta Lake sink — write query results as Delta table
+conn.execute("""
+    CREATE SINK archive AS
+        SELECT * FROM trades
+    WITH (
+        connector = 'delta-lake',
+        'table_uri' = 's3://my-bucket/warehouse/trades',
+        'write_mode' = 'append'
+    )
+""")
+```
+
+### Apache Iceberg
+
+```python
+# Iceberg sink — write to an Iceberg table
+conn.execute("""
+    CREATE SINK warehouse AS
+        SELECT symbol, price, ts FROM trades
+    WITH (
+        connector = 'iceberg',
+        'catalog_uri' = 'https://catalog.example.com',
+        'catalog_type' = 'rest',
+        'table' = 'analytics.trades',
+        'write_mode' = 'append'
+    )
+""")
 ```
 
 ---
@@ -1259,7 +1407,6 @@ config = laminardb.LaminarConfig(
     buffer_size=65536,             # source buffer size (default: 65536)
     storage_dir="/tmp/laminar",    # storage directory (optional)
     checkpoint_interval_ms=10000,  # checkpoint interval in ms (optional)
-    table_spill_threshold=1_000_000,  # spill threshold (default: 1M)
 )
 
 conn = laminardb.open(":memory:", config=config)

@@ -98,18 +98,17 @@ class TestSourceMetrics:
         assert isinstance(ms, list)
 
     def test_source_metrics_properties(self, db):
-        # Insert some data so metrics exist
         db.insert("sensors", {"ts": 1, "device": "a", "value": 1.0})
         m = db.source_metrics("sensors")
-        if m is not None:
-            assert isinstance(m.name, str)
-            assert isinstance(m.total_events, int)
-            assert isinstance(m.pending, int)
-            assert isinstance(m.capacity, int)
-            assert isinstance(m.is_backpressured, bool)
-            assert isinstance(m.watermark, int)
-            assert isinstance(m.utilization, float)
-            assert "SourceMetrics" in repr(m)
+        assert m is not None, "source_metrics should return metrics after insert"
+        assert isinstance(m.name, str)
+        assert isinstance(m.total_events, int)
+        assert isinstance(m.pending, int)
+        assert isinstance(m.capacity, int)
+        assert isinstance(m.is_backpressured, bool)
+        assert isinstance(m.watermark, int)
+        assert isinstance(m.utilization, float)
+        assert "SourceMetrics" in repr(m)
 
 
 class TestStreamMetrics:

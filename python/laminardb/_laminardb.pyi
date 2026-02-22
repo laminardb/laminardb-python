@@ -6,11 +6,11 @@ from typing import Any, Union
 
 __version__: str
 
-# Supported input types for data ingestion
+# Supported input types for data ingestion.
+# Use insert_json()/insert_csv() for string-based ingestion.
 DataInput = Union[
     dict[str, Any],          # single row or columnar dict
     list[dict[str, Any]],    # list of row dicts
-    str,                     # JSON or CSV string
     Any,                     # PyArrow RecordBatch/Table, Pandas/Polars DataFrame
 ]
 
@@ -106,7 +106,6 @@ class LaminarConfig:
         buffer_size: int = 65536,
         storage_dir: str | None = None,
         checkpoint_interval_ms: int | None = None,
-        table_spill_threshold: int = 1_000_000,
     ) -> None: ...
 
     @property
@@ -115,8 +114,6 @@ class LaminarConfig:
     def storage_dir(self) -> str | None: ...
     @property
     def checkpoint_interval_ms(self) -> int | None: ...
-    @property
-    def table_spill_threshold(self) -> int: ...
 
     def __repr__(self) -> str: ...
 
@@ -253,6 +250,14 @@ class Connection:
         """
         ...
 
+    def query_stream(self, name: str, filter: str | None = None) -> QueryResult:
+        """Query a named stream's current data.
+
+        Looks up the stream's SQL definition from the catalog and runs it
+        as a batch query, optionally appending a WHERE clause.
+        """
+        ...
+
     def schema(self, table: str) -> Any:
         """Get the schema of a table as a PyArrow Schema."""
         ...
@@ -291,7 +296,7 @@ class Connection:
 
     # ── DuckDB-style aliases ──
 
-    def sql(self, query: str, params: Any = None) -> QueryResult:
+    def sql(self, query: str) -> QueryResult:
         """Execute a SQL query (DuckDB-style alias for query())."""
         ...
 
@@ -793,9 +798,17 @@ class StreamMetrics:
 # ---------------------------------------------------------------------------
 
 def open(path: str, *, config: LaminarConfig | None = None) -> Connection:
-    """Open a LaminarDB database at the given file path."""
+    """Open a LaminarDB database.
+
+    The path names the database instance. LaminarDB currently operates
+    in-memory; use ``LaminarConfig(storage_dir=...)`` for WAL/checkpoint storage.
+    """
     ...
 
 def connect(uri: str) -> Connection:
-    """Connect to a LaminarDB database via URI."""
+    """Open a LaminarDB database.
+
+    Currently equivalent to ``open()`` — the URI is accepted for forward
+    compatibility but remote connections are not yet supported.
+    """
     ...

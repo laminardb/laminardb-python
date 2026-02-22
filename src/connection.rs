@@ -718,16 +718,7 @@ impl PyConnection {
     // ── DuckDB-style aliases ──
 
     /// Execute a SQL query (DuckDB-style alias for `query()`).
-    ///
-    /// `params` is reserved for future parameterized query support.
-    #[pyo3(signature = (query, params = None))]
-    fn sql(
-        &self,
-        py: Python<'_>,
-        query: &str,
-        params: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<QueryResult> {
-        let _ = params;
+    fn sql(&self, py: Python<'_>, query: &str) -> PyResult<QueryResult> {
         self.query(py, query)
     }
 

@@ -88,8 +88,12 @@ class TestStreamSubscription:
         conn.insert("events", {"id": 1, "msg": "hello"})
         # Use next_timeout so we don't block forever
         result = sub.next_timeout(2000)
+        # Data may not arrive within the timeout in all environments,
+        # but if it does, verify it has rows
         if result is not None:
             assert result.num_rows > 0
+        else:
+            pytest.skip("data did not arrive within timeout")
         sub.cancel()
 
 

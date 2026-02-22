@@ -6,13 +6,10 @@ import laminardb
 from laminardb.types import (
     ChangeEvent,
     ChangeRow,
-    CheckpointStatus,
     Column,
     MaterializedView,
     Metrics,
     Schema,
-    TableStats,
-    Watermark,
 )
 from conftest import requires_pyarrow
 
@@ -115,42 +112,6 @@ class TestSchema:
         r = repr(schema)
         assert "Schema" in r
         assert "id" in r
-
-
-# ---------------------------------------------------------------------------
-# TableStats, Watermark, CheckpointStatus
-# ---------------------------------------------------------------------------
-
-
-class TestTableStats:
-    def test_construction(self):
-        stats = TableStats(row_count=100, size_bytes=4096)
-        assert stats.row_count == 100
-        assert stats.size_bytes == 4096
-
-    def test_frozen(self):
-        stats = TableStats(row_count=0, size_bytes=0)
-        with pytest.raises(AttributeError):
-            stats.row_count = 1
-
-
-class TestWatermark:
-    def test_construction(self):
-        wm = Watermark(current=1000, lag_ms=50)
-        assert wm.current == 1000
-        assert wm.lag_ms == 50
-
-
-class TestCheckpointStatus:
-    def test_with_id(self):
-        cs = CheckpointStatus(checkpoint_id=42, enabled=True)
-        assert cs.checkpoint_id == 42
-        assert cs.enabled is True
-
-    def test_without_id(self):
-        cs = CheckpointStatus(checkpoint_id=None, enabled=False)
-        assert cs.checkpoint_id is None
-        assert cs.enabled is False
 
 
 # ---------------------------------------------------------------------------

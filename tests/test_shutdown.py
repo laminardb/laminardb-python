@@ -20,12 +20,8 @@ class TestShutdown:
 
 class TestCancelQuery:
     def test_cancel_query_invalid_id(self, db):
-        # Cancelling a non-existent query should raise or be a no-op
-        # depending on the implementation — just verify it doesn't crash
-        try:
-            db.cancel_query(999999)
-        except laminardb.LaminarError:
-            pass  # acceptable
+        # Cancelling a non-existent query is a no-op (no error raised)
+        db.cancel_query(999999)
 
     def test_cancel_query_after_close_raises(self, tmp_path):
         conn = laminardb.open(str(tmp_path / "test.db"))

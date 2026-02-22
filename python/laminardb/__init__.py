@@ -17,8 +17,8 @@ Key classes:
     ChangeRow       A single row from a change stream.
 
 Functions:
-    open(path)      Open a file-based LaminarDB database.
-    connect(uri)    Connect to a LaminarDB database via URI.
+    open(path)      Open a LaminarDB database (currently in-memory).
+    connect(uri)    Open a LaminarDB database (URI reserved for future use).
     sql(query)      Execute SQL on the default connection.
     execute(query)  Execute SQL on the default connection.
 
@@ -74,13 +74,10 @@ from laminardb._laminardb import (
 from laminardb.types import (
     ChangeEvent,
     ChangeRow,
-    CheckpointStatus,
     Column,
     MaterializedView,
     Metrics,
     Schema,
-    TableStats,
-    Watermark,
 )
 
 # ---------------------------------------------------------------------------
@@ -107,30 +104,27 @@ def _get_default() -> Connection:
         return _default_connection
 
 
-def sql(query: str, params: object = None) -> QueryResult:
+def sql(query: str) -> QueryResult:
     """Execute a SQL query on the default connection.
 
     Args:
         query: The SQL query to execute.
-        params: Reserved for future parameterized query support.
 
     Returns:
         QueryResult with the query results.
     """
-    return _get_default().sql(query, params)
+    return _get_default().sql(query)
 
 
-def execute(query: str, params: object = None) -> ExecuteResult:
+def execute(query: str) -> ExecuteResult:
     """Execute a SQL statement on the default connection.
 
     Args:
         query: The SQL statement to execute.
-        params: Reserved for future parameterized query support.
 
     Returns:
         ExecuteResult with the statement result.
     """
-    _ = params
     return _get_default().execute(query)
 
 
@@ -176,9 +170,6 @@ __all__ = [
     "Column",
     "ChangeEvent",
     "ChangeRow",
-    "TableStats",
-    "Watermark",
-    "CheckpointStatus",
     "Metrics",
     # Catalog info
     "SourceInfo",

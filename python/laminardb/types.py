@@ -56,10 +56,7 @@ class Schema:
         return len(self._schema)
 
     def __getitem__(self, key: int | str) -> Column:
-        if isinstance(key, int):
-            f = self._schema.field(key)
-        else:
-            f = self._schema.field(key)
+        f = self._schema.field(key)
         return Column(name=f.name, type=str(f.type), nullable=f.nullable)
 
     def __repr__(self) -> str:
@@ -68,32 +65,8 @@ class Schema:
 
 
 # ---------------------------------------------------------------------------
-# Stat / status types
+# Metrics
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class TableStats:
-    """Statistics for a table/source."""
-
-    row_count: int
-    size_bytes: int
-
-
-@dataclass(frozen=True)
-class Watermark:
-    """Watermark position for a source or stream."""
-
-    current: int
-    lag_ms: int
-
-
-@dataclass(frozen=True)
-class CheckpointStatus:
-    """Checkpoint status for a connection."""
-
-    checkpoint_id: int | None
-    enabled: bool
 
 
 class Metrics:
@@ -111,8 +84,8 @@ class Metrics:
         return float(self._inner.total_events_ingested / uptime)
 
     @property
-    def memory_used_bytes(self) -> int:
-        """Total events ingested (proxy for memory usage)."""
+    def total_events(self) -> int:
+        """Total events ingested across all sources."""
         return int(self._inner.total_events_ingested)
 
     @property

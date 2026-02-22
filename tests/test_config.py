@@ -11,15 +11,12 @@ class TestLaminarConfig:
         assert config.buffer_size == 65536
         assert config.storage_dir is None
         assert config.checkpoint_interval_ms is None
-        assert config.table_spill_threshold == 1_000_000
 
     def test_custom_config(self):
         config = laminardb.LaminarConfig(
             buffer_size=1024,
-            table_spill_threshold=500_000,
         )
         assert config.buffer_size == 1024
-        assert config.table_spill_threshold == 500_000
 
     def test_config_repr(self):
         config = laminardb.LaminarConfig(buffer_size=2048)

@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Connection management**: `open(path)` and `connect(uri)` with context manager support
-- **Configuration**: `LaminarConfig` with `buffer_size`, `storage_dir`, `checkpoint_interval_ms`, `table_spill_threshold`
+- **Configuration**: `LaminarConfig` with `buffer_size`, `storage_dir`, `checkpoint_interval_ms`
 - **Schema operations**: `create_table()`, `list_tables()`, `list_streams()`, `list_sinks()`, `schema()`, `execute()`
 - **Data ingestion** from 10 input types:
   - Python dicts (single row, list of rows, columnar)

@@ -75,7 +75,7 @@ class TestQueryResultConversion:
     def test_to_df_auto_detect(self, conn):
         result = conn.query(SAMPLE_SQL)
         df = result.to_df()
-        assert df is not None
+        assert len(df) == 3
 
 
 class TestQueryResultProperties:

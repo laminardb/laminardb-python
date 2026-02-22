@@ -112,19 +112,24 @@ fn register_codes(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-/// Open a LaminarDB database at the given file path.
+/// Open a LaminarDB database.
+///
+/// The `path` parameter names the database instance.  LaminarDB currently
+/// operates in-memory; the path is accepted for API compatibility but does
+/// not enable file-based persistence.  Use `LaminarConfig(storage_dir=...)`
+/// if you need WAL / checkpoint storage.
 ///
 /// Example:
 ///     db = laminardb.open("my_database")
 ///     db = laminardb.open("mydb", config=laminardb.LaminarConfig(buffer_size=1024))
 #[pyfunction]
 #[pyo3(signature = (path, *, config=None))]
+#[allow(unused_variables)]
 fn open(
     py: Python<'_>,
     path: &str,
     config: Option<&config::PyLaminarConfig>,
 ) -> PyResult<PyConnection> {
-    let _ = path; // path unused until file-based persistence is wired
     py.allow_threads(|| {
         let _rt = async_support::runtime().enter();
         let conn = match config {
@@ -137,7 +142,10 @@ fn open(
     })
 }
 
-/// Connect to a LaminarDB database via URI.
+/// Connect to a LaminarDB database.
+///
+/// Currently equivalent to `open()` — the URI is accepted for forward
+/// compatibility but remote connections are not yet supported.
 ///
 /// Example:
 ///     db = laminardb.connect("laminar://localhost:5432/mydb")

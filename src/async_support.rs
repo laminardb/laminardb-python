@@ -82,16 +82,6 @@ impl AsyncSubscription {
         if !self.is_active() {
             return Err(PyStopAsyncIteration::new_err(()));
         }
-
-        // For async iteration we still use allow_threads + future_into_py
-        // since QueryStream.next() is a blocking call
-        let is_active = self.is_active();
-        if !is_active {
-            return Err(PyStopAsyncIteration::new_err(()));
-        }
-
-        // We need to move the check into the future
-        // Use a simple wrapper that polls in the tokio runtime
         pyo3_async_runtimes::tokio::future_into_py(py, {
             // Can't move Mutex guard into async, so we do blocking poll
             let result = {

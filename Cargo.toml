@@ -1,6 +1,6 @@
 [package]
 name = "laminardb"
-version = "0.13.2"
+version = "0.15.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -22,13 +22,38 @@ arrow-schema = "57"
 arrow-json = "57"
 arrow-csv = "57"
 
-laminar-db = { path = "laminardb/crates/laminar-db", package = "laminar-db", features = ["api", "jit", "kafka", "postgres-cdc", "postgres-sink", "rocksdb"] }
+laminar-db = { path = "laminardb/crates/laminar-db", package = "laminar-db", features = [
+    "api",
+    "jit",
+    "kafka",
+    "postgres-cdc",
+    "postgres-sink",
+    "delta-lake",
+    "websocket",
+    "mysql-cdc",
+    "iceberg",
+    "parquet-lookup",
+] }
 laminar-core = { path = "laminardb/crates/laminar-core", package = "laminar-core" }
+
+# Direct connector dependency for cloud storage features (optional)
+laminar-connectors = { path = "laminardb/crates/laminar-connectors", package = "laminar-connectors", optional = true }
 
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 parking_lot = "0.12"
 anyhow = "1"
+
+[features]
+default = []
+# Cloud storage backends for Delta Lake / Iceberg connectors
+delta-lake-s3 = ["dep:laminar-connectors", "laminar-connectors/delta-lake-s3"]
+delta-lake-azure = ["dep:laminar-connectors", "laminar-connectors/delta-lake-azure"]
+delta-lake-gcs = ["dep:laminar-connectors", "laminar-connectors/delta-lake-gcs"]
+delta-lake-unity = ["dep:laminar-connectors", "laminar-connectors/delta-lake-unity"]
+delta-lake-glue = ["dep:laminar-connectors", "laminar-connectors/delta-lake-glue"]
+# Enable all cloud storage backends
+cloud-all = ["delta-lake-s3", "delta-lake-azure", "delta-lake-gcs"]
 
 [profile.release]
 lto = true

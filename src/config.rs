@@ -15,24 +15,21 @@ pub struct PyLaminarConfig {
     buffer_size: usize,
     storage_dir: Option<String>,
     checkpoint_interval_ms: Option<u64>,
-    table_spill_threshold: usize,
 }
 
 #[pymethods]
 impl PyLaminarConfig {
     #[new]
-    #[pyo3(signature = (*, buffer_size=65536, storage_dir=None, checkpoint_interval_ms=None, table_spill_threshold=1_000_000))]
+    #[pyo3(signature = (*, buffer_size=65536, storage_dir=None, checkpoint_interval_ms=None))]
     fn new(
         buffer_size: usize,
         storage_dir: Option<String>,
         checkpoint_interval_ms: Option<u64>,
-        table_spill_threshold: usize,
     ) -> Self {
         Self {
             buffer_size,
             storage_dir,
             checkpoint_interval_ms,
-            table_spill_threshold,
         }
     }
 
@@ -51,18 +48,10 @@ impl PyLaminarConfig {
         self.checkpoint_interval_ms
     }
 
-    #[getter]
-    fn table_spill_threshold(&self) -> usize {
-        self.table_spill_threshold
-    }
-
     fn __repr__(&self) -> String {
         format!(
-            "LaminarConfig(buffer_size={}, storage_dir={:?}, checkpoint_interval_ms={:?}, table_spill_threshold={})",
-            self.buffer_size,
-            self.storage_dir,
-            self.checkpoint_interval_ms,
-            self.table_spill_threshold
+            "LaminarConfig(buffer_size={}, storage_dir={:?}, checkpoint_interval_ms={:?})",
+            self.buffer_size, self.storage_dir, self.checkpoint_interval_ms
         )
     }
 }
@@ -84,7 +73,6 @@ impl PyLaminarConfig {
             default_buffer_size: self.buffer_size,
             storage_dir: self.storage_dir.as_ref().map(PathBuf::from),
             checkpoint,
-            table_spill_threshold: self.table_spill_threshold,
             ..laminar_db::LaminarConfig::default()
         }
     }

@@ -1,5 +1,7 @@
 """Tests for module-level functions, aliases, and new exceptions."""
 
+import pytest
+
 import laminardb
 
 
@@ -102,9 +104,6 @@ class TestExports:
             "Column",
             "ChangeEvent",
             "ChangeRow",
-            "TableStats",
-            "Watermark",
-            "CheckpointStatus",
             "Metrics",
         ]
         for name in expected:
@@ -121,6 +120,3 @@ class TestExports:
     def test_all_contains_module_functions(self):
         for name in ["sql", "execute", "mv"]:
             assert name in laminardb.__all__, f"{name} not in __all__"
-
-
-import pytest
