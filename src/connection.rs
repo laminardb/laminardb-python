@@ -12,6 +12,7 @@ use pyo3::prelude::*;
 use pyo3_arrow::PySchema;
 
 use crate::async_support::{AsyncSubscription, runtime};
+use crate::callback::CallbackSubscription;
 use crate::catalog::{PyQueryInfo, PySinkInfo, PySourceInfo, PyStreamInfo};
 use crate::checkpoint::PyCheckpointResult;
 use crate::conversion;
@@ -221,6 +222,60 @@ impl PyConnection {
             };
             Ok(AsyncStreamSubscription::from_core(sub))
         })
+    }
+
+    /// Subscribe to a continuous query with a callback.
+    ///
+    /// The `on_data` callable receives a `QueryResult` for each batch.
+    /// If `on_error` is provided, it is called with an error message string
+    /// when the callback or subscription raises; if it also raises (or is
+    /// absent), the subscription stops.
+    #[pyo3(signature = (sql, on_data, on_error = None))]
+    fn subscribe_callback(
+        &self,
+        py: Python<'_>,
+        sql: &str,
+        on_data: PyObject,
+        on_error: Option<PyObject>,
+    ) -> PyResult<CallbackSubscription> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let sql = sql.to_owned();
+        let stream = py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.query_stream(&sql).into_pyresult()
+        })?;
+        Ok(CallbackSubscription::from_query_stream(
+            stream, on_data, on_error,
+        ))
+    }
+
+    /// Subscribe to a named stream with a callback.
+    ///
+    /// The `on_data` callable receives a `QueryResult` for each batch.
+    /// If `on_error` is provided, it is called with an error message string
+    /// when the callback or subscription raises; if it also raises (or is
+    /// absent), the subscription stops.
+    #[pyo3(signature = (name, on_data, on_error = None))]
+    fn subscribe_stream_callback(
+        &self,
+        py: Python<'_>,
+        name: &str,
+        on_data: PyObject,
+        on_error: Option<PyObject>,
+    ) -> PyResult<CallbackSubscription> {
+        self.check_closed()?;
+        let inner = self.inner.clone();
+        let name = name.to_owned();
+        let sub = py.allow_threads(|| {
+            let _rt = runtime().enter();
+            let conn = inner.lock();
+            conn.subscribe(&name).into_pyresult()
+        })?;
+        Ok(CallbackSubscription::from_arrow_subscription(
+            sub, on_data, on_error,
+        ))
     }
 
     /// Get the schema of a source or stream as a PyArrow Schema.
