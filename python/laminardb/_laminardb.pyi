@@ -266,6 +266,34 @@ class Connection:
         """
         ...
 
+    def subscribe_callback(
+        self,
+        sql: str,
+        on_data: Callable[[QueryResult], None],
+        on_error: Callable[[str], None] | None = None,
+    ) -> CallbackSubscription:
+        """Subscribe to a continuous query with a callback.
+
+        ``on_data`` is called with a ``QueryResult`` for each batch.
+        ``on_error`` is called with an error message string on failure;
+        if absent or if it raises, the subscription stops.
+        """
+        ...
+
+    def subscribe_stream_callback(
+        self,
+        name: str,
+        on_data: Callable[[QueryResult], None],
+        on_error: Callable[[str], None] | None = None,
+    ) -> CallbackSubscription:
+        """Subscribe to a named stream with a callback.
+
+        ``on_data`` is called with a ``QueryResult`` for each batch.
+        ``on_error`` is called with an error message string on failure;
+        if absent or if it raises, the subscription stops.
+        """
+        ...
+
     def query_stream(self, name: str, filter: str | None = None) -> QueryResult:
         """Query a named stream's current data.
 
@@ -619,6 +647,28 @@ class StreamSubscription:
     def __repr__(self) -> str: ...
     def __iter__(self) -> Iterator[QueryResult]: ...
     def __next__(self) -> QueryResult: ...
+
+class CallbackSubscription:
+    """A push-based subscription that calls a Python function for each batch.
+
+    Created via ``Connection.subscribe_callback()`` or
+    ``Connection.subscribe_stream_callback()``.
+    """
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the background thread is still running."""
+        ...
+
+    def cancel(self) -> None:
+        """Stop the subscription. Safe to call multiple times."""
+        ...
+
+    def wait(self) -> None:
+        """Block until the background thread exits. Releases the GIL."""
+        ...
+
+    def __repr__(self) -> str: ...
 
 class AsyncStreamSubscription:
     """An asynchronous subscription to a named stream.

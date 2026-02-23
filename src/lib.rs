@@ -10,6 +10,7 @@
 #![allow(deprecated)]
 
 mod async_support;
+mod callback;
 mod catalog;
 mod checkpoint;
 mod config;
@@ -43,6 +44,7 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<connection::QueryStreamIter>()?;
     m.add_class::<stream_subscription::StreamSubscription>()?;
     m.add_class::<stream_subscription::AsyncStreamSubscription>()?;
+    m.add_class::<callback::CallbackSubscription>()?;
     m.add_class::<execute::ExecuteResult>()?;
     m.add_class::<config::PyLaminarConfig>()?;
 
