@@ -60,7 +60,10 @@ impl PyLaminarConfig {
     fn __repr__(&self) -> String {
         format!(
             "LaminarConfig(buffer_size={}, storage_dir={:?}, checkpoint_interval_ms={:?}, table_spill_threshold={})",
-            self.buffer_size, self.storage_dir, self.checkpoint_interval_ms, self.table_spill_threshold
+            self.buffer_size,
+            self.storage_dir,
+            self.checkpoint_interval_ms,
+            self.table_spill_threshold
         )
     }
 }

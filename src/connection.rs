@@ -328,7 +328,13 @@ impl PyConnection {
         let columns: Vec<String> = arrow_schema
             .fields()
             .iter()
-            .map(|f| Ok(format!("{} {}", f.name(), arrow_type_to_sql(f.data_type())?)))
+            .map(|f| {
+                Ok(format!(
+                    "{} {}",
+                    f.name(),
+                    arrow_type_to_sql(f.data_type())?
+                ))
+            })
             .collect::<PyResult<Vec<String>>>()?;
         let col_defs = columns.join(", ");
         let inner = self.inner.clone();
