@@ -111,7 +111,6 @@ class LaminarConfig:
         buffer_size: int = 65536,
         storage_dir: str | None = None,
         checkpoint_interval_ms: int | None = None,
-        table_spill_threshold: int = 0,
     ) -> None: ...
 
     @property
@@ -120,10 +119,6 @@ class LaminarConfig:
     def storage_dir(self) -> str | None: ...
     @property
     def checkpoint_interval_ms(self) -> int | None: ...
-    @property
-    def table_spill_threshold(self) -> int:
-        """Row threshold for spilling table data to disk (0 = disabled)."""
-        ...
 
     def __repr__(self) -> str: ...
 

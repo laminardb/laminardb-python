@@ -688,14 +688,16 @@ impl PyConnection {
                 let _rt = runtime().enter();
                 match Arc::try_unwrap(inner) {
                     Ok(mutex) => {
-                        mutex.into_inner().close();
+                        // Sole owner — consume and close.
+                        let _ = mutex.into_inner().close();
                     }
                     Err(arc) => {
                         // Other references still exist (Writer, Subscription, etc.).
-                        // Close through the shared reference so the connection is
-                        // always cleaned up, even with outstanding handles.
+                        // close(self) requires ownership, so use shutdown(&self)
+                        // to drain in-flight work.  The connection will be fully
+                        // closed when the last Arc reference drops.
                         let conn = arc.lock();
-                        conn.close();
+                        let _ = conn.shutdown();
                     }
                 }
                 Ok(())
