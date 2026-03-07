@@ -7,7 +7,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
-    import pyarrow
+    import pyarrow  # type: ignore[import-untyped]
 
 __version__: str
 
