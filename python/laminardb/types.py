@@ -6,9 +6,10 @@ around the lower-level Rust-backed types.
 
 from __future__ import annotations
 
-import threading
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Callable, Iterator
+
 
 # ---------------------------------------------------------------------------
 # Column & Schema
@@ -65,40 +66,6 @@ class Schema:
 
 
 # ---------------------------------------------------------------------------
-# TableStats & Watermark & CheckpointStatus
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class TableStats:
-    """Statistics for a source table."""
-
-    row_count: int
-    size_bytes: int
-
-
-@dataclass(frozen=True)
-class Watermark:
-    """Watermark state for a source or stream."""
-
-    current: int
-    lag_ms: int = 0
-
-
-@dataclass(frozen=True)
-class CheckpointStatus:
-    """Status of the checkpoint system.
-
-    .. deprecated::
-        Use :class:`laminardb.CheckpointResult` returned by
-        ``Connection.checkpoint()`` instead.
-    """
-
-    checkpoint_id: int | None
-    enabled: bool
-
-
-# ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
 
@@ -145,23 +112,28 @@ class Metrics:
 # ---------------------------------------------------------------------------
 
 
-class ChangeRow:
-    """A single row from a change stream with its operation type."""
+class ChangeRow(Mapping[str, Any]):
+    """A single row from a change stream with its operation type.
+
+    Implements ``collections.abc.Mapping`` so it can be used directly
+    as a dict-like object.
+    """
+
+    __slots__ = ("op", "_data")
 
     def __init__(self, op: str, data: dict[str, Any]) -> None:
         self.op = op
         self._data = data
 
+    # Mapping ABC
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
 
-    def keys(self) -> list[str]:
-        """Column names."""
-        return list(self._data.keys())
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
 
-    def values(self) -> list[Any]:
-        """Column values."""
-        return list(self._data.values())
+    def __len__(self) -> int:
+        return len(self._data)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the row data as a dict (without the op field)."""
@@ -184,11 +156,12 @@ class ChangeEvent:
 
     def _materialize(self) -> list[ChangeRow]:
         if self._rows is None:
-            rows = []
-            for tup in self._result:
-                row_dict = {}
-                for i, col in enumerate(self._result.columns):
-                    row_dict[col] = tup[i] if isinstance(tup, tuple) else tup
+            dicts = self._result.to_dicts()
+            columns = list(dicts.keys())
+            n_rows = len(next(iter(dicts.values()))) if columns else 0
+            rows: list[ChangeRow] = []
+            for i in range(n_rows):
+                row_dict = {col: dicts[col][i] for col in columns}
                 rows.append(ChangeRow(op=self._op, data=row_dict))
             self._rows = rows
         return self._rows
@@ -267,26 +240,22 @@ class MaterializedView:
         """Subscribe to changes on this materialized view.
 
         Args:
-            handler: Optional callback. If provided, starts a background
-                daemon thread that calls handler(ChangeEvent) for each
-                batch. If None, returns the raw StreamSubscription.
+            handler: Optional callback.  If provided, uses a
+                ``CallbackSubscription`` with proper cancellation.
+                If None, returns the raw ``StreamSubscription``.
 
         Returns:
-            StreamSubscription if no handler, otherwise the background
-            thread object.
+            StreamSubscription if no handler, otherwise a
+            CallbackSubscription that can be cancelled via ``.cancel()``.
         """
-        sub = self._conn.subscribe_stream(self._name)
         if handler is None:
-            return sub
+            return self._conn.subscribe_stream(self._name)
 
-        def _run() -> None:
-            for batch in sub:
-                event = ChangeEvent(batch)
-                handler(event)
+        def _on_data(query_result: Any) -> None:
+            event = ChangeEvent(query_result)
+            handler(event)
 
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        return t
+        return self._conn.subscribe_stream_callback(self._name, _on_data)
 
     def __repr__(self) -> str:
         return f"MaterializedView(name={self._name!r})"

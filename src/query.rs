@@ -121,19 +121,7 @@ impl QueryResult {
 
     /// Fetch all rows as a list of tuples.
     fn fetchall<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let table = self.to_arrow(py)?;
-        let pylist = table.call_method0("to_pylist")?;
-        // Convert list[dict] → list[tuple] by extracting values
-        let builtins = py.import("builtins")?;
-        let tuple_fn = builtins.getattr("tuple")?;
-        let rows = pyo3::types::PyList::empty(py);
-        for row in pylist.try_iter()? {
-            let row: Bound<'py, PyAny> = row?;
-            let values = row.call_method0("values")?;
-            let tup = tuple_fn.call1((values,))?;
-            rows.append(tup)?;
-        }
-        Ok(rows.into_any())
+        self.batches_to_tuples(py, &self.batches)
     }
 
     /// Fetch the first row as a tuple, or None if empty.
@@ -141,21 +129,37 @@ impl QueryResult {
         if self.num_rows() == 0 {
             return Ok(py.None().into_bound(py));
         }
-        let rows = self.fetchall(py)?;
-        rows.get_item(0)
+        // Slice only the first row from the first non-empty batch.
+        for batch in &self.batches {
+            if batch.num_rows() > 0 {
+                let sliced = vec![batch.slice(0, 1)];
+                let rows = self.batches_to_tuples(py, &sliced)?;
+                return rows.get_item(0);
+            }
+        }
+        Ok(py.None().into_bound(py))
     }
 
     /// Fetch up to `size` rows as a list of tuples.
     #[pyo3(signature = (size = 1))]
     fn fetchmany<'py>(&self, py: Python<'py>, size: usize) -> PyResult<Bound<'py, PyAny>> {
-        let rows = self.fetchall(py)?;
-        let len = rows.len()?;
-        let end = std::cmp::min(size, len);
-        let slice = rows.call_method1(
-            "__getitem__",
-            (pyo3::types::PySlice::new(py, 0, end as isize, 1),),
-        )?;
-        Ok(slice)
+        if size == 0 {
+            return Ok(pyo3::types::PyList::empty(py).into_any());
+        }
+        // Collect only `size` rows worth of sliced batches.
+        let mut remaining = size;
+        let mut sliced = Vec::new();
+        for batch in &self.batches {
+            if remaining == 0 {
+                break;
+            }
+            let take = std::cmp::min(remaining, batch.num_rows());
+            if take > 0 {
+                sliced.push(batch.slice(0, take));
+                remaining -= take;
+            }
+        }
+        self.batches_to_tuples(py, &sliced)
     }
 
     /// Print a preview of the result (up to `max_rows` rows).
@@ -202,6 +206,26 @@ impl QueryResult {
 }
 
 impl QueryResult {
+    /// Convert a slice of RecordBatches to a Python list of tuples.
+    fn batches_to_tuples<'py>(
+        &self,
+        py: Python<'py>,
+        batches: &[RecordBatch],
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let table = conversion::batches_to_pyarrow(py, batches, &self.schema)?;
+        let pylist = table.call_method0("to_pylist")?;
+        let builtins = py.import("builtins")?;
+        let tuple_fn = builtins.getattr("tuple")?;
+        let rows = pyo3::types::PyList::empty(py);
+        for row in pylist.try_iter()? {
+            let row: Bound<'py, PyAny> = row?;
+            let values = row.call_method0("values")?;
+            let tup = tuple_fn.call1((values,))?;
+            rows.append(tup)?;
+        }
+        Ok(rows.into_any())
+    }
+
     /// Create from pre-collected batches and schema.
     pub fn new(batches: Vec<RecordBatch>, schema: SchemaRef) -> Self {
         Self { batches, schema }

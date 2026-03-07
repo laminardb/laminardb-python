@@ -16,7 +16,7 @@ use crate::callback::CallbackSubscription;
 use crate::catalog::{PyQueryInfo, PySinkInfo, PySourceInfo, PyStreamInfo};
 use crate::checkpoint::PyCheckpointResult;
 use crate::conversion;
-use crate::error::{ConnectionError, IntoPyResult, QueryError};
+use crate::error::{ConnectionError, IntoPyResult, QueryError, SchemaError};
 use crate::execute::ExecuteResult;
 use crate::metrics::{PyPipelineMetrics, PyPipelineTopology, PySourceMetrics, PyStreamMetrics};
 use crate::query::QueryResult;
@@ -328,8 +328,8 @@ impl PyConnection {
         let columns: Vec<String> = arrow_schema
             .fields()
             .iter()
-            .map(|f| format!("{} {}", f.name(), arrow_type_to_sql(f.data_type())))
-            .collect();
+            .map(|f| Ok(format!("{} {}", f.name(), arrow_type_to_sql(f.data_type())?)))
+            .collect::<PyResult<Vec<String>>>()?;
         let col_defs = columns.join(", ");
         let inner = self.inner.clone();
         let name = name.to_owned();
@@ -669,7 +669,7 @@ impl PyConnection {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let result = conn.execute(&sql).into_pyresult()?;
-            Ok(ExecuteResult::from_core(result))
+            ExecuteResult::from_core(result)
         })
     }
 
@@ -680,9 +680,17 @@ impl PyConnection {
             let inner = self.inner.clone();
             py.allow_threads(|| -> PyResult<()> {
                 let _rt = runtime().enter();
-                if let Ok(mutex) = Arc::try_unwrap(inner) {
-                    let conn = mutex.into_inner();
-                    let _ = conn.close();
+                match Arc::try_unwrap(inner) {
+                    Ok(mutex) => {
+                        mutex.into_inner().close();
+                    }
+                    Err(arc) => {
+                        // Other references still exist (Writer, Subscription, etc.).
+                        // Close through the shared reference so the connection is
+                        // always cleaned up, even with outstanding handles.
+                        let conn = arc.lock();
+                        conn.close();
+                    }
                 }
                 Ok(())
             })?;
@@ -794,9 +802,17 @@ impl PyConnection {
         self.check_closed()?;
         let explain_sql = format!("EXPLAIN {}", query);
         let result = self.query(py, &explain_sql)?;
+        // EXPLAIN returns a single-column result with the plan text.
+        // Extract column values as a list and join them.
         let table = conversion::batches_to_pyarrow(py, result.batches_ref(), result.schema_ref())?;
-        let text: String = table.call_method0("to_string")?.extract()?;
-        Ok(text)
+        let column = table.call_method1("column", (0i32,))?;
+        let py_list = column.call_method0("to_pylist")?;
+        let mut lines = Vec::new();
+        for item in py_list.try_iter()? {
+            let s: String = item?.extract()?;
+            lines.push(s);
+        }
+        Ok(lines.join("\n"))
     }
 
     /// Get statistics for a table/source as a dict.
@@ -834,6 +850,10 @@ impl PyConnection {
             "Connection(open)".to_owned()
         }
     }
+
+    fn __del__(&mut self, py: Python<'_>) -> PyResult<()> {
+        self.close(py)
+    }
 }
 
 impl PyConnection {
@@ -854,25 +874,31 @@ impl PyConnection {
 }
 
 /// Map Arrow DataType to a SQL type string for DDL generation.
-fn arrow_type_to_sql(dt: &arrow_schema::DataType) -> &'static str {
+///
+/// Returns an error for unsupported types instead of silently degrading.
+fn arrow_type_to_sql(dt: &arrow_schema::DataType) -> PyResult<&'static str> {
     use arrow_schema::DataType;
     match dt {
-        DataType::Int8 => "TINYINT",
-        DataType::Int16 => "SMALLINT",
-        DataType::Int32 => "INT",
-        DataType::Int64 => "BIGINT",
-        DataType::UInt8 => "TINYINT UNSIGNED",
-        DataType::UInt16 => "SMALLINT UNSIGNED",
-        DataType::UInt32 => "INT UNSIGNED",
-        DataType::UInt64 => "BIGINT UNSIGNED",
-        DataType::Float32 => "FLOAT",
-        DataType::Float64 => "DOUBLE",
-        DataType::Boolean => "BOOLEAN",
-        DataType::Utf8 | DataType::LargeUtf8 => "VARCHAR",
-        DataType::Binary | DataType::LargeBinary => "BLOB",
-        DataType::Date32 | DataType::Date64 => "DATE",
-        DataType::Timestamp(_, _) => "TIMESTAMP",
-        _ => "VARCHAR",
+        DataType::Int8 => Ok("TINYINT"),
+        DataType::Int16 => Ok("SMALLINT"),
+        DataType::Int32 => Ok("INT"),
+        DataType::Int64 => Ok("BIGINT"),
+        DataType::UInt8 => Ok("TINYINT UNSIGNED"),
+        DataType::UInt16 => Ok("SMALLINT UNSIGNED"),
+        DataType::UInt32 => Ok("INT UNSIGNED"),
+        DataType::UInt64 => Ok("BIGINT UNSIGNED"),
+        DataType::Float32 => Ok("FLOAT"),
+        DataType::Float64 => Ok("DOUBLE"),
+        DataType::Boolean => Ok("BOOLEAN"),
+        DataType::Utf8 | DataType::LargeUtf8 => Ok("VARCHAR"),
+        DataType::Binary | DataType::LargeBinary => Ok("BLOB"),
+        DataType::Date32 | DataType::Date64 => Ok("DATE"),
+        DataType::Timestamp(_, _) => Ok("TIMESTAMP"),
+        DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => Ok("DECIMAL"),
+        DataType::Duration(_) | DataType::Interval(_) => Ok("BIGINT"),
+        other => Err(SchemaError::new_err(format!(
+            "Unsupported Arrow type for DDL: {other:?}"
+        ))),
     }
 }
 

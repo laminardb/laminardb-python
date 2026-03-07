@@ -1,5 +1,6 @@
 //! Async support: Tokio runtime management and async Python classes.
 
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use parking_lot::Mutex;
@@ -33,31 +34,47 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
 }
 
 // ---------------------------------------------------------------------------
+// Send/Sync wrapper for subscription inner types
+// ---------------------------------------------------------------------------
+
+/// Wrapper asserting `Send + Sync` for types protected by a `Mutex`.
+///
+/// # Safety
+///
+/// All access to the inner value is serialized through the `Mutex`.
+/// The wrapped types (`QueryStream`, `ArrowSubscription`) are only accessed
+/// by one thread at a time and do not contain thread-local state.
+pub(crate) struct SyncCell<T>(pub(crate) Mutex<Option<T>>);
+
+// Safety: Access is serialized through the Mutex. The wrapped subscription
+// types are safe to send between threads (they contain Arc-based buffers
+// and channel receivers with no thread-affinity).
+unsafe impl<T> Send for SyncCell<T> {}
+unsafe impl<T> Sync for SyncCell<T> {}
+
+// ---------------------------------------------------------------------------
 // Async subscription
 // ---------------------------------------------------------------------------
 
 /// An asynchronous subscription to a continuous query.
 #[pyclass(name = "AsyncSubscription")]
 pub struct AsyncSubscription {
-    inner: Mutex<Option<laminar_db::api::QueryStream>>,
+    inner: Arc<SyncCell<laminar_db::api::QueryStream>>,
 }
-
-unsafe impl Send for AsyncSubscription {}
-unsafe impl Sync for AsyncSubscription {}
 
 #[pymethods]
 impl AsyncSubscription {
     /// Whether the subscription is still active.
     #[getter]
     fn is_active(&self) -> bool {
-        let guard = self.inner.lock();
+        let guard = self.inner.0.lock();
         guard.as_ref().is_some_and(|s| s.is_active())
     }
 
     /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
         py.allow_threads(|| {
-            let mut guard = self.inner.lock();
+            let mut guard = self.inner.0.lock();
             if let Some(stream) = guard.as_mut() {
                 stream.cancel();
             }
@@ -66,7 +83,7 @@ impl AsyncSubscription {
     }
 
     fn __repr__(&self) -> String {
-        let guard = self.inner.lock();
+        let guard = self.inner.0.lock();
         match guard.as_ref() {
             Some(s) if s.is_active() => "AsyncSubscription(active)".to_owned(),
             Some(_) => "AsyncSubscription(finished)".to_owned(),
@@ -82,20 +99,26 @@ impl AsyncSubscription {
         if !self.is_active() {
             return Err(PyStopAsyncIteration::new_err(()));
         }
-        pyo3_async_runtimes::tokio::future_into_py(py, {
-            // Can't move Mutex guard into async, so we do blocking poll
-            let result = {
-                let mut guard = self.inner.lock();
+        let cell = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            // Run the blocking next() on the tokio blocking thread pool
+            // so we don't block the Python thread or a tokio worker.
+            let result = tokio::task::spawn_blocking(move || {
+                let _rt = runtime().enter();
+                let mut guard = cell.0.lock();
                 match guard.as_mut() {
                     Some(stream) => stream.next().into_pyresult(),
                     None => Ok(None),
                 }
-            };
-            async move {
-                match result? {
-                    Some(batch) => Ok(QueryResult::from_batch(batch)),
-                    None => Err(PyStopAsyncIteration::new_err(())),
-                }
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Task join error: {e}"))
+            })??;
+
+            match result {
+                Some(batch) => Ok(QueryResult::from_batch(batch)),
+                None => Err(PyStopAsyncIteration::new_err(())),
             }
         })
     }
@@ -104,7 +127,7 @@ impl AsyncSubscription {
 impl AsyncSubscription {
     pub fn from_core(stream: laminar_db::api::QueryStream) -> Self {
         Self {
-            inner: Mutex::new(Some(stream)),
+            inner: Arc::new(SyncCell(Mutex::new(Some(stream)))),
         }
     }
 }

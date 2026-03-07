@@ -77,32 +77,28 @@ from laminardb._laminardb import (
 from laminardb.types import (
     ChangeEvent,
     ChangeRow,
-    CheckpointStatus,
     Column,
     MaterializedView,
     Metrics,
     Schema,
-    TableStats,
-    Watermark,
 )
-
-# ---------------------------------------------------------------------------
-# Aliases
-# ---------------------------------------------------------------------------
-
-Config = LaminarConfig
-BatchWriter = Writer
 
 # ---------------------------------------------------------------------------
 # Module-level default connection
 # ---------------------------------------------------------------------------
 
-_default_connection: Connection | None = None
 _default_lock = threading.Lock()
+_default_connection: Connection | None = None
 
 
 def _get_default() -> Connection:
-    """Get or create the default in-memory connection."""
+    """Get or create the default in-memory connection.
+
+    Thread-safe: the lock serialises both creation and retrieval so
+    that callers always receive a valid, open connection.  The
+    underlying Rust ``Connection`` is also internally mutex-protected,
+    so concurrent *use* from multiple threads is safe.
+    """
     global _default_connection
     with _default_lock:
         if _default_connection is None or _default_connection.is_closed:
@@ -169,19 +165,13 @@ __all__ = [
     "StreamSubscription",
     "AsyncStreamSubscription",
     "CallbackSubscription",
-    # Aliases
-    "Config",
-    "BatchWriter",
     # High-level types
     "MaterializedView",
     "Schema",
     "Column",
     "ChangeEvent",
     "ChangeRow",
-    "CheckpointStatus",
     "Metrics",
-    "TableStats",
-    "Watermark",
     # Catalog info
     "SourceInfo",
     "SinkInfo",

@@ -146,11 +146,18 @@ class TestChangeRow:
 
     def test_keys(self):
         row = ChangeRow("Delete", {"a": 1, "b": 2})
-        assert row.keys() == ["a", "b"]
+        assert list(row.keys()) == ["a", "b"]
 
     def test_values(self):
         row = ChangeRow("Insert", {"x": 10})
-        assert row.values() == [10]
+        assert list(row.values()) == [10]
+
+    def test_mapping_protocol(self):
+        row = ChangeRow("Insert", {"a": 1, "b": 2})
+        assert len(row) == 2
+        assert "a" in row
+        assert dict(row) == {"a": 1, "b": 2}
+        assert list(row.items()) == [("a", 1), ("b", 2)]
 
     def test_to_dict(self):
         row = ChangeRow("Insert", {"id": 1})

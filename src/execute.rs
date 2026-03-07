@@ -95,47 +95,54 @@ impl ExecuteResult {
 
 impl ExecuteResult {
     /// Create from the core API's ExecuteResult enum.
-    pub fn from_core(result: laminar_db::api::ExecuteResult) -> Self {
+    ///
+    /// Returns `Err` if the query stream produces an error while collecting
+    /// batches (previously this was silently swallowed).
+    pub fn from_core(result: laminar_db::api::ExecuteResult) -> PyResult<Self> {
         match result {
-            laminar_db::api::ExecuteResult::Ddl(info) => Self {
+            laminar_db::api::ExecuteResult::Ddl(info) => Ok(Self {
                 result_type: "ddl",
                 rows_affected: 0,
                 ddl_type: Some(info.statement_type),
                 ddl_object: Some(info.object_name),
                 query_result: None,
-            },
-            laminar_db::api::ExecuteResult::RowsAffected(n) => Self {
+            }),
+            laminar_db::api::ExecuteResult::RowsAffected(n) => Ok(Self {
                 result_type: "rows_affected",
                 rows_affected: n,
                 ddl_type: None,
                 ddl_object: None,
                 query_result: None,
-            },
+            }),
             laminar_db::api::ExecuteResult::Query(mut stream) => {
                 let schema = stream.schema();
                 let mut batches = Vec::new();
-                while let Ok(Some(batch)) = stream.next() {
-                    batches.push(batch);
+                loop {
+                    match stream.next() {
+                        Ok(Some(batch)) => batches.push(batch),
+                        Ok(None) => break,
+                        Err(e) => return Err(crate::error::core_error_to_pyerr(e)),
+                    }
                 }
                 let qr = QueryResult::new(batches, schema);
                 let row_count = qr.row_count();
-                Self {
+                Ok(Self {
                     result_type: "query",
                     rows_affected: row_count as u64,
                     ddl_type: None,
                     ddl_object: None,
                     query_result: Some(qr),
-                }
+                })
             }
             laminar_db::api::ExecuteResult::Metadata(batch) => {
                 let qr = QueryResult::from_batch(batch);
-                Self {
+                Ok(Self {
                     result_type: "metadata",
                     rows_affected: 0,
                     ddl_type: None,
                     ddl_object: None,
                     query_result: Some(qr),
-                }
+                })
             }
         }
     }

@@ -38,19 +38,13 @@ class TestModuleLevelFunctions:
 
 
 # ---------------------------------------------------------------------------
-# Aliases
+# LaminarConfig
 # ---------------------------------------------------------------------------
 
 
-class TestAliases:
-    def test_config_alias(self):
-        assert laminardb.Config is laminardb.LaminarConfig
-
-    def test_batch_writer_alias(self):
-        assert laminardb.BatchWriter is laminardb.Writer
-
-    def test_config_alias_works(self):
-        cfg = laminardb.Config(buffer_size=1024)
+class TestLaminarConfigDirect:
+    def test_config_direct(self):
+        cfg = laminardb.LaminarConfig(buffer_size=1024)
         assert cfg.buffer_size == 1024
 
 
@@ -111,10 +105,6 @@ class TestExports:
 
     def test_all_contains_new_exceptions(self):
         for name in ["StreamError", "CheckpointError", "ConnectorError"]:
-            assert name in laminardb.__all__, f"{name} not in __all__"
-
-    def test_all_contains_aliases(self):
-        for name in ["Config", "BatchWriter"]:
             assert name in laminardb.__all__, f"{name} not in __all__"
 
     def test_all_contains_module_functions(self):

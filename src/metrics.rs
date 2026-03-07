@@ -238,6 +238,12 @@ impl PyPipelineMetrics {
         self.inner.pipeline_watermark
     }
 
+    /// Duration of the last pipeline cycle in nanoseconds.
+    #[getter]
+    fn last_cycle_duration_ns(&self) -> u64 {
+        self.inner.last_cycle_duration_ns
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "PipelineMetrics(state={:?}, ingested={}, emitted={})",

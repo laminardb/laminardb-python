@@ -40,17 +40,14 @@ impl Subscription {
 
     /// Non-blocking poll for the next result.
     fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        let guard = self.inner.lock();
-        if guard.is_none() {
-            return Ok(None);
-        }
-        drop(guard);
-
         py.allow_threads(|| {
+            let _rt = crate::async_support::runtime().enter();
             let mut guard = self.inner.lock();
-            let stream = guard.as_mut().unwrap();
-            match stream.try_next().into_pyresult()? {
-                Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+            match guard.as_mut() {
+                Some(stream) => match stream.try_next().into_pyresult()? {
+                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
+                    None => Ok(None),
+                },
                 None => Ok(None),
             }
         })
@@ -70,22 +67,17 @@ impl Subscription {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<QueryResult> {
-        let guard = self.inner.lock();
-        if guard.as_ref().is_none_or(|s| !s.is_active()) {
-            return Err(PyStopIteration::new_err(()));
-        }
-        drop(guard);
-
-        let result = py.allow_threads(|| {
+        py.allow_threads(|| {
+            let _rt = crate::async_support::runtime().enter();
             let mut guard = self.inner.lock();
-            let stream = guard.as_mut().unwrap();
-            stream.next().into_pyresult()
-        })?;
-
-        match result {
-            Some(batch) => Ok(QueryResult::from_batch(batch)),
-            None => Err(PyStopIteration::new_err(())),
-        }
+            match guard.as_mut() {
+                Some(stream) if stream.is_active() => match stream.next().into_pyresult()? {
+                    Some(batch) => Ok(QueryResult::from_batch(batch)),
+                    None => Err(PyStopIteration::new_err(())),
+                },
+                _ => Err(PyStopIteration::new_err(())),
+            }
+        })
     }
 }
 

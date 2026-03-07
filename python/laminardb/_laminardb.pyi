@@ -1,8 +1,13 @@
 """Type stubs for the laminardb native extension module."""
 
+from __future__ import annotations
+
 from collections.abc import AsyncIterator, Callable, Iterator
 from types import TracebackType
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
+
+if TYPE_CHECKING:
+    import pyarrow
 
 __version__: str
 
@@ -106,6 +111,7 @@ class LaminarConfig:
         buffer_size: int = 65536,
         storage_dir: str | None = None,
         checkpoint_interval_ms: int | None = None,
+        table_spill_threshold: int = 0,
     ) -> None: ...
 
     @property
@@ -114,6 +120,10 @@ class LaminarConfig:
     def storage_dir(self) -> str | None: ...
     @property
     def checkpoint_interval_ms(self) -> int | None: ...
+    @property
+    def table_spill_threshold(self) -> int:
+        """Row threshold for spilling table data to disk (0 = disabled)."""
+        ...
 
     def __repr__(self) -> str: ...
 
@@ -302,11 +312,15 @@ class Connection:
         """
         ...
 
-    def schema(self, table: str) -> Any:
-        """Get the schema of a table as a PyArrow Schema."""
+    def schema(self, table: str) -> pyarrow.Schema:
+        """Get the schema of a table or stream as a PyArrow Schema.
+
+        For streams, this executes the stream's SQL definition to infer
+        the schema and then immediately cancels the query.
+        """
         ...
 
-    def create_table(self, name: str, schema: Any) -> None:
+    def create_table(self, name: str, schema: pyarrow.Schema | dict[str, str]) -> None:
         """Create a new table with the given schema."""
         ...
 
@@ -430,7 +444,7 @@ class Writer:
         """The name of the source this writer is writing to."""
         ...
     @property
-    def schema(self) -> Any:
+    def schema(self) -> pyarrow.Schema:
         """The schema of the source as a PyArrow Schema."""
         ...
     @property
@@ -471,7 +485,7 @@ class QueryResult:
     """The result of a SQL query."""
 
     @property
-    def schema(self) -> Any:
+    def schema(self) -> pyarrow.Schema:
         """The schema as a PyArrow Schema."""
         ...
     @property
@@ -491,7 +505,7 @@ class QueryResult:
         """Iterate over rows as tuples."""
         ...
 
-    def to_arrow(self) -> Any:
+    def to_arrow(self) -> pyarrow.Table:
         """Convert to a PyArrow Table."""
         ...
 
@@ -518,14 +532,14 @@ class QueryResult:
     # ── DuckDB-style methods ──
 
     def df(self) -> Any:
-        """Convert to a Pandas DataFrame (DuckDB-style alias)."""
+        """Convert to a Pandas DataFrame (DuckDB-style alias for ``to_pandas()``)."""
         ...
 
     def pl(self, *, lazy: bool = False) -> Any:
         """Convert to a Polars DataFrame. If lazy=True, returns LazyFrame."""
         ...
 
-    def arrow(self) -> Any:
+    def arrow(self) -> pyarrow.Table:
         """Convert to a PyArrow Table (DuckDB-style alias)."""
         ...
 
@@ -624,7 +638,7 @@ class StreamSubscription:
     @property
     def is_active(self) -> bool: ...
     @property
-    def schema(self) -> Any:
+    def schema(self) -> pyarrow.Schema:
         """The subscription schema as a PyArrow Schema."""
         ...
 
@@ -633,7 +647,11 @@ class StreamSubscription:
         ...
 
     def next_timeout(self, timeout_ms: int) -> QueryResult | None:
-        """Blocking wait for the next batch with a timeout in milliseconds."""
+        """Blocking wait for the next batch with a timeout in milliseconds.
+
+        Raises ``SubscriptionError`` (code ``SUBSCRIPTION_TIMEOUT``) if
+        the timeout expires.  Returns ``None`` only when the stream ends.
+        """
         ...
 
     def try_next(self) -> QueryResult | None:
@@ -681,7 +699,7 @@ class AsyncStreamSubscription:
     @property
     def is_active(self) -> bool: ...
     @property
-    def schema(self) -> Any:
+    def schema(self) -> pyarrow.Schema:
         """The subscription schema as a PyArrow Schema."""
         ...
 
@@ -690,7 +708,11 @@ class AsyncStreamSubscription:
         ...
 
     def next_timeout(self, timeout_ms: int) -> QueryResult | None:
-        """Blocking wait for the next batch with a timeout in milliseconds."""
+        """Blocking wait for the next batch with a timeout in milliseconds.
+
+        Raises ``SubscriptionError`` (code ``SUBSCRIPTION_TIMEOUT``) if
+        the timeout expires.  Returns ``None`` only when the stream ends.
+        """
         ...
 
     def try_next(self) -> QueryResult | None:
@@ -715,7 +737,7 @@ class SourceInfo:
     @property
     def name(self) -> str: ...
     @property
-    def schema(self) -> Any:
+    def schema(self) -> pyarrow.Schema:
         """The source schema as a PyArrow Schema."""
         ...
     @property
@@ -767,7 +789,7 @@ class PipelineNode:
         """One of 'source', 'stream', or 'sink'."""
         ...
     @property
-    def schema(self) -> Any | None:
+    def schema(self) -> pyarrow.Schema | None:
         """The node schema as a PyArrow Schema, or None."""
         ...
     @property
@@ -828,6 +850,10 @@ class PipelineMetrics:
     def sink_count(self) -> int: ...
     @property
     def pipeline_watermark(self) -> int: ...
+    @property
+    def last_cycle_duration_ns(self) -> int:
+        """Duration of the last pipeline cycle in nanoseconds."""
+        ...
 
     def __repr__(self) -> str: ...
 
@@ -886,7 +912,8 @@ def open(path: str, *, config: LaminarConfig | None = None) -> Connection:
 def connect(uri: str) -> Connection:
     """Open a LaminarDB database.
 
-    Currently equivalent to ``open()`` — the URI is accepted for forward
-    compatibility but remote connections are not yet supported.
+    Remote connections are not yet supported.  Currently only accepts
+    ``":memory:"``; any other URI raises ``NotImplementedError``.
+    Prefer ``open()`` instead.
     """
     ...

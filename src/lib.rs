@@ -150,13 +150,20 @@ fn open(
 
 /// Connect to a LaminarDB database.
 ///
-/// Currently equivalent to `open()` — the URI is accepted for forward
-/// compatibility but remote connections are not yet supported.
+/// Remote connections are not yet supported. This function currently only
+/// accepts `":memory:"` or raises an error.  Use `open()` instead.
 ///
 /// Example:
-///     db = laminardb.connect("laminar://localhost:5432/mydb")
+///     db = laminardb.connect(":memory:")
 #[pyfunction]
-fn connect(py: Python<'_>, _uri: &str) -> PyResult<PyConnection> {
+fn connect(py: Python<'_>, uri: &str) -> PyResult<PyConnection> {
+    if uri != ":memory:" {
+        return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
+            "Remote connections are not yet supported. \
+             Use laminardb.open(\":memory:\") for an in-memory database. \
+             Got: {uri:?}"
+        )));
+    }
     py.allow_threads(|| {
         let _rt = async_support::runtime().enter();
         let conn = laminar_db::api::Connection::open().into_pyresult()?;
