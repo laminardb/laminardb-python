@@ -7,9 +7,9 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
-    import pandas  # type: ignore[import-untyped,import-not-found]
-    import polars  # type: ignore[import-not-found]
-    import pyarrow  # type: ignore[import-untyped,import-not-found]
+    import pandas
+    import polars
+    import pyarrow  # type: ignore[import-untyped]
 
 __version__: str
 
