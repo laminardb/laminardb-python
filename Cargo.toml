@@ -1,6 +1,6 @@
 [package]
 name = "laminardb"
-version = "0.18.0"
+version = "0.18.12"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -24,15 +24,17 @@ arrow-csv = "57"
 
 laminar-db = { path = "laminardb/crates/laminar-db", package = "laminar-db", features = [
     "api",
-    "jit",
     "kafka",
     "postgres-cdc",
     "postgres-sink",
     "delta-lake",
+    "delta",
     "websocket",
     "mysql-cdc",
     "iceberg",
     "parquet-lookup",
+    "files",
+    "mongodb-cdc",
 ] }
 laminar-core = { path = "laminardb/crates/laminar-core", package = "laminar-core" }
 

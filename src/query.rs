@@ -3,7 +3,7 @@
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use pyo3::prelude::*;
-use pyo3_arrow::PySchema;
+use pyo3_arrow::{PySchema, PyTable};
 
 use crate::conversion;
 
@@ -86,11 +86,11 @@ impl QueryResult {
         py: Python<'py>,
         requested_schema: Option<&Bound<'py, PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        // Export via PyArrow table's __arrow_c_stream__
-        let table = self.to_arrow(py)?;
+        let py_table = PyTable::try_new(self.batches.clone(), self.schema.clone())?;
+        let table_obj = py_table.into_pyobject(py)?.into_any();
         match requested_schema {
-            Some(schema) => table.call_method1("__arrow_c_stream__", (schema,)),
-            None => table.call_method0("__arrow_c_stream__"),
+            Some(schema) => table_obj.call_method1("__arrow_c_stream__", (schema,)),
+            None => table_obj.call_method0("__arrow_c_stream__"),
         }
     }
 

@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
+
+if TYPE_CHECKING:
+    import pyarrow  # type: ignore[import-untyped]
 
 
 # ---------------------------------------------------------------------------
@@ -28,11 +31,11 @@ class Column:
 class Schema:
     """Wraps a PyArrow Schema with convenience accessors."""
 
-    def __init__(self, arrow_schema: Any) -> None:
+    def __init__(self, arrow_schema: pyarrow.Schema) -> None:
         self._schema = arrow_schema
 
     @property
-    def arrow_schema(self) -> Any:
+    def arrow_schema(self) -> pyarrow.Schema:
         """The underlying PyArrow Schema."""
         return self._schema
 

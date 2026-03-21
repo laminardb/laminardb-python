@@ -57,6 +57,18 @@ class TestSyncSubscription:
         assert "finished" in repr(sub)
 
 
+    def test_context_manager(self, conn):
+        with conn.subscribe(SAMPLE_SQL) as sub:
+            assert sub.is_active
+        assert not sub.is_active
+
+    def test_context_manager_cancels_on_exception(self, conn):
+        with pytest.raises(ValueError):
+            with conn.subscribe(SAMPLE_SQL) as sub:
+                raise ValueError("test")
+        assert not sub.is_active
+
+
 class TestAsyncSubscription:
     @pytest.mark.asyncio
     async def test_subscribe_async(self, conn):
@@ -83,3 +95,9 @@ class TestAsyncSubscription:
         sub.cancel()
         # cancel() stops the stream but doesn't drop it — repr shows "finished"
         assert "finished" in repr(sub)
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self, conn):
+        async with await conn.subscribe_async(SAMPLE_SQL) as sub:
+            assert sub.is_active
+        assert not sub.is_active

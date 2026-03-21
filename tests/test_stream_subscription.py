@@ -83,6 +83,17 @@ class TestStreamSubscription:
         assert iter(sub) is sub
         sub.cancel()
 
+    def test_context_manager(self, conn):
+        with conn.subscribe_stream("filtered") as sub:
+            assert sub.is_active
+        assert not sub.is_active
+
+    def test_context_manager_cancels_on_exception(self, conn):
+        with pytest.raises(ValueError):
+            with conn.subscribe_stream("filtered") as sub:
+                raise ValueError("test")
+        assert not sub.is_active
+
     def test_subscribe_stream_with_data(self, conn):
         sub = conn.subscribe_stream("filtered")
         conn.insert("events", {"id": 1, "msg": "hello"})
@@ -171,3 +182,9 @@ class TestAsyncStreamSubscription:
         else:
             pytest.skip("data did not arrive within timeout")
         sub.cancel()
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self, conn):
+        async with await conn.subscribe_stream_async("filtered") as sub:
+            assert sub.is_active
+        assert not sub.is_active

@@ -200,13 +200,12 @@ fn callback_thread_loop(
                 }
             }
             Ok(None) => {
-                // No data ready yet — sleep briefly to avoid busy-spin
-                thread::sleep(Duration::from_millis(50));
+                // No data ready — brief sleep to avoid busy-spin.
+                thread::sleep(Duration::from_millis(1));
             }
             Err(e) => {
-                let msg = format!("{}", e);
                 let should_stop = Python::with_gil(|py| {
-                    let py_err = pyo3::exceptions::PyRuntimeError::new_err(msg);
+                    let py_err = crate::error::core_error_to_pyerr(e);
                     handle_callback_error(py, py_err, on_error)
                 });
                 if should_stop {

@@ -79,6 +79,28 @@ impl Subscription {
             }
         })
     }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &self,
+        py: Python<'_>,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_val: Option<&Bound<'_, PyAny>>,
+        _exc_tb: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        self.cancel(py)?;
+        Ok(false)
+    }
+
+    fn __del__(&self) {
+        let mut guard = self.inner.lock();
+        if let Some(stream) = guard.as_mut() {
+            stream.cancel();
+        }
+    }
 }
 
 impl Subscription {

@@ -14,6 +14,8 @@ use crate::query::QueryResult;
 // Global Tokio runtime
 // ---------------------------------------------------------------------------
 
+// The runtime lives for the process lifetime. OnceLock does not support take(),
+// and daemon worker threads exit automatically when the process exits.
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Get or create the global Tokio runtime.
@@ -121,6 +123,44 @@ impl AsyncSubscription {
                 None => Err(PyStopAsyncIteration::new_err(())),
             }
         })
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &self,
+        py: Python<'_>,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_val: Option<&Bound<'_, PyAny>>,
+        _exc_tb: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        self.cancel(py)?;
+        Ok(false)
+    }
+
+    fn __aenter__(slf: Py<Self>, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        let obj: Py<PyAny> = slf.into_any();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move { Ok(obj) })
+    }
+
+    fn __aexit__<'py>(
+        &self,
+        py: Python<'py>,
+        _exc_type: Option<&Bound<'py, PyAny>>,
+        _exc_val: Option<&Bound<'py, PyAny>>,
+        _exc_tb: Option<&Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.cancel(py)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async { Ok(false) })
+    }
+
+    fn __del__(&self) {
+        let mut guard = self.inner.0.lock();
+        if let Some(stream) = guard.as_mut() {
+            stream.cancel();
+        }
     }
 }
 

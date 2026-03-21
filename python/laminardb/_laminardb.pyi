@@ -7,6 +7,8 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
+    import pandas  # type: ignore[import-untyped]
+    import polars
     import pyarrow  # type: ignore[import-untyped]
 
 __version__: str
@@ -14,9 +16,12 @@ __version__: str
 # Supported input types for data ingestion.
 # Use insert_json()/insert_csv() for string-based ingestion.
 DataInput = Union[
-    dict[str, Any],          # single row or columnar dict
-    list[dict[str, Any]],    # list of row dicts
-    Any,                     # PyArrow RecordBatch/Table, Pandas/Polars DataFrame
+    dict[str, Any],
+    list[dict[str, Any]],
+    "pyarrow.RecordBatch",
+    "pyarrow.Table",
+    "pandas.DataFrame",
+    "polars.DataFrame",
 ]
 
 # ---------------------------------------------------------------------------
@@ -504,11 +509,11 @@ class QueryResult:
         """Convert to a PyArrow Table."""
         ...
 
-    def to_pandas(self) -> Any:
+    def to_pandas(self) -> "pandas.DataFrame":
         """Convert to a Pandas DataFrame."""
         ...
 
-    def to_polars(self) -> Any:
+    def to_polars(self) -> "polars.DataFrame":
         """Convert to a Polars DataFrame."""
         ...
 
@@ -526,7 +531,7 @@ class QueryResult:
 
     # ── DuckDB-style methods ──
 
-    def df(self) -> Any:
+    def df(self) -> "pandas.DataFrame":
         """Convert to a Pandas DataFrame (DuckDB-style alias for ``to_pandas()``)."""
         ...
 
@@ -592,6 +597,13 @@ class Subscription:
     @property
     def is_active(self) -> bool: ...
 
+    def __enter__(self) -> Subscription: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
     def __repr__(self) -> str: ...
     def __iter__(self) -> Iterator[QueryResult]: ...
     def __next__(self) -> QueryResult: ...
@@ -610,6 +622,20 @@ class AsyncSubscription:
     @property
     def is_active(self) -> bool: ...
 
+    def __enter__(self) -> AsyncSubscription: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+    async def __aenter__(self) -> AsyncSubscription: ...
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
     def __repr__(self) -> str: ...
     def __aiter__(self) -> AsyncIterator[QueryResult]: ...
     async def __anext__(self) -> QueryResult: ...
@@ -657,6 +683,13 @@ class StreamSubscription:
         """Cancel the subscription."""
         ...
 
+    def __enter__(self) -> StreamSubscription: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
     def __repr__(self) -> str: ...
     def __iter__(self) -> Iterator[QueryResult]: ...
     def __next__(self) -> QueryResult: ...
@@ -718,6 +751,20 @@ class AsyncStreamSubscription:
         """Cancel the subscription."""
         ...
 
+    def __enter__(self) -> AsyncStreamSubscription: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+    async def __aenter__(self) -> AsyncStreamSubscription: ...
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
     def __repr__(self) -> str: ...
     def __aiter__(self) -> AsyncIterator[QueryResult]: ...
     async def __anext__(self) -> QueryResult: ...

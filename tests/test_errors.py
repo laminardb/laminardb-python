@@ -5,6 +5,27 @@ import pytest
 import laminardb
 
 
+class TestExceptionHierarchy:
+    @pytest.mark.parametrize(
+        "exc_cls",
+        [
+            laminardb.ConnectionError,
+            laminardb.QueryError,
+            laminardb.IngestionError,
+            laminardb.SchemaError,
+            laminardb.SubscriptionError,
+            laminardb.StreamError,
+            laminardb.CheckpointError,
+            laminardb.ConnectorError,
+        ],
+    )
+    def test_subclass_of_laminar_error(self, exc_cls):
+        assert issubclass(exc_cls, laminardb.LaminarError)
+
+    def test_laminar_error_is_exception(self):
+        assert issubclass(laminardb.LaminarError, Exception)
+
+
 class TestErrorCodes:
     def test_codes_module_exists(self):
         assert hasattr(laminardb, "codes")

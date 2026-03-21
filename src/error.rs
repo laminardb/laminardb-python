@@ -2,11 +2,14 @@
 //!
 //! Exception hierarchy:
 //!   LaminarError (base)
-//!   ├── ConnectionError
-//!   ├── QueryError
-//!   ├── IngestionError
-//!   ├── SchemaError
-//!   └── SubscriptionError
+//!   ├── ConnectionError     (codes 100-199)
+//!   ├── SchemaError         (codes 200-299)
+//!   ├── IngestionError      (codes 300-399)
+//!   ├── QueryError          (codes 400-499)
+//!   ├── SubscriptionError   (codes 500-599)
+//!   ├── StreamError         (codes 600-699)
+//!   ├── CheckpointError     (codes 700-799)
+//!   └── ConnectorError      (codes 800-899)
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -100,6 +103,9 @@ pub fn core_error_to_pyerr(err: laminar_db::api::ApiError) -> PyErr {
         codes::SUBSCRIPTION_FAILED | codes::SUBSCRIPTION_CLOSED | codes::SUBSCRIPTION_TIMEOUT => {
             SubscriptionError::new_err(msg)
         }
+        600..=699 => StreamError::new_err(msg),
+        700..=799 => CheckpointError::new_err(msg),
+        800..=899 => ConnectorError::new_err(msg),
         _ => LaminarError::new_err(msg),
     };
     // Attach the numeric error code to the exception instance
@@ -132,6 +138,9 @@ fn error_code_name(code: i32) -> &'static str {
         codes::SUBSCRIPTION_TIMEOUT => "Subscription timeout",
         codes::INTERNAL_ERROR => "Internal error",
         codes::SHUTDOWN => "Shutdown",
+        600..=699 => "Stream error",
+        700..=799 => "Checkpoint error",
+        800..=899 => "Connector error",
         _ => "Unknown error",
     }
 }
