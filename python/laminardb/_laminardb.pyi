@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
     import pandas
-    import polars
+    import polars  # type: ignore[import-not-found]
     import pyarrow  # type: ignore[import-untyped]
 
 __version__: str
