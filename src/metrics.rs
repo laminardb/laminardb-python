@@ -238,10 +238,16 @@ impl PyPipelineMetrics {
         self.inner.pipeline_watermark
     }
 
-    /// Duration of the last pipeline cycle in nanoseconds.
+    /// Number of materialized-view updates applied.
     #[getter]
-    fn last_cycle_duration_ns(&self) -> u64 {
-        self.inner.last_cycle_duration_ns
+    fn mv_updates(&self) -> u64 {
+        self.inner.mv_updates
+    }
+
+    /// Approximate bytes retained by materialized views.
+    #[getter]
+    fn mv_bytes_stored(&self) -> u64 {
+        self.inner.mv_bytes_stored
     }
 
     fn __repr__(&self) -> String {
@@ -334,34 +340,14 @@ impl PyStreamMetrics {
     }
 
     #[getter]
-    fn pending(&self) -> usize {
-        self.inner.pending
-    }
-
-    #[getter]
-    fn capacity(&self) -> usize {
-        self.inner.capacity
-    }
-
-    #[getter]
-    fn is_backpressured(&self) -> bool {
-        self.inner.is_backpressured
-    }
-
-    #[getter]
-    fn watermark(&self) -> i64 {
-        self.inner.watermark
-    }
-
-    #[getter]
     fn sql(&self) -> Option<&str> {
         self.inner.sql.as_deref()
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "StreamMetrics(name='{}', events={}, pending={})",
-            self.inner.name, self.inner.total_events, self.inner.pending
+            "StreamMetrics(name='{}', events={})",
+            self.inner.name, self.inner.total_events
         )
     }
 }

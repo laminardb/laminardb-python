@@ -70,6 +70,8 @@ class TestPipelineMetrics:
         assert isinstance(m.stream_count, int)
         assert isinstance(m.sink_count, int)
         assert isinstance(m.pipeline_watermark, int)
+        assert isinstance(m.mv_updates, int)
+        assert isinstance(m.mv_bytes_stored, int)
 
     def test_pipeline_metrics_repr(self, db):
         m = db.metrics()

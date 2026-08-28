@@ -12,12 +12,11 @@ db = laminardb.open(":memory:")
 # 1. Ingest live BTC trades straight from Binance WebSocket
 db.execute("""
     CREATE SOURCE trades (
-        s VARCHAR, p DOUBLE, q DOUBLE, "T" BIGINT,
+        s VARCHAR, p DOUBLE, q DOUBLE, "T" TIMESTAMP,
         WATERMARK FOR "T" AS "T" - INTERVAL '0' SECOND
     ) FROM WEBSOCKET (
-        url    = 'wss://stream.binance.com:9443/ws/btcusdt@trade',
-        format = 'json'
-    )
+        url = 'wss://stream.binance.com:9443/ws/btcusdt@trade'
+    ) FORMAT JSON
 """)
 
 # 2. 10-second VWAP windows with BUY/SELL/HOLD signal

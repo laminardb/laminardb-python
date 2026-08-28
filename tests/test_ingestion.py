@@ -39,6 +39,18 @@ class TestPandasIngestion:
         count = db.insert("sensors", df)
         assert count == 3
 
+    def test_insert_casts_timestamp_precision(self, db):
+        import pandas as pd
+
+        db.execute("CREATE SOURCE event_times (ts TIMESTAMP, value DOUBLE)")
+        df = pd.DataFrame(
+            {
+                "ts": pd.to_datetime(["2026-08-27T12:00:00.123456"]),
+                "value": [1.0],
+            }
+        )
+        assert db.insert("event_times", df) == 1
+
 
 @requires_polars
 class TestPolarsIngestion:
@@ -78,6 +90,43 @@ class TestPyArrowIngestion:
         count = db.insert("sensors", table)
         assert count == 3
 
+    def test_insert_casts_large_string_to_declared_varchar(self, db):
+        import pyarrow as pa
+
+        table = pa.table(
+            {
+                "ts": pa.array([1], type=pa.int64()),
+                "device": pa.array(["a"], type=pa.large_string()),
+                "value": pa.array([1.0], type=pa.float64()),
+            }
+        )
+        assert db.insert("sensors", table) == 1
+
+    def test_insert_reorders_columns_by_name(self, db):
+        import pyarrow as pa
+
+        table = pa.table(
+            {
+                "value": pa.array([1.0], type=pa.float64()),
+                "device": pa.array(["a"], type=pa.string()),
+                "ts": pa.array([1], type=pa.int64()),
+            }
+        )
+        assert db.insert("sensors", table) == 1
+
+    def test_insert_rejects_missing_declared_column(self, db):
+        import pyarrow as pa
+
+        table = pa.table(
+            {
+                "other": pa.array([1], type=pa.int64()),
+                "device": pa.array(["a"], type=pa.string()),
+                "value": pa.array([1.0], type=pa.float64()),
+            }
+        )
+        with pytest.raises(laminardb.IngestionError, match="missing column 'ts'"):
+            db.insert("sensors", table)
+
 
 class TestIngestionErrors:
     def test_insert_unsupported_type(self, db):
@@ -110,6 +159,13 @@ class TestWriter:
         with db.writer("sensors") as w:
             w.insert(sample_data["rows"])
             w.flush()
+
+    @requires_pandas
+    def test_writer_casts_pandas_schema(self, db, sample_data):
+        import pandas as pd
+
+        with db.writer("sensors") as writer:
+            writer.insert(pd.DataFrame(sample_data["rows"]))
 
 
 class TestWriterProperties:

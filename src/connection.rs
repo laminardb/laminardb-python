@@ -1,14 +1,16 @@
 //! Python `Connection` class wrapping `laminar_db::api::Connection`.
 //!
-//! All blocking operations release the GIL via `py.allow_threads()`.
-//! All API calls enter the global Tokio runtime context so that background
-//! tasks spawned by laminar-db (e.g. query stream bridges) actually execute.
+//! All blocking operations release the GIL via `py.detach()`.
+//! API calls enter the persistent Tokio runtime when the core expects one.
+//! Blocking named-stream subscription calls are the exception: core 0.30
+//! requires them to run outside any async runtime.
 
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
 use parking_lot::Mutex;
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
 use pyo3_arrow::PySchema;
 
 use crate::async_support::{AsyncSubscription, runtime};
@@ -45,10 +47,14 @@ impl PyConnection {
     /// Insert data into a source. Returns the number of rows inserted.
     fn insert(&self, py: Python<'_>, table: &str, data: &Bound<'_, PyAny>) -> PyResult<u64> {
         self.check_closed()?;
-        let batches = conversion::python_to_batches(py, data, None)?;
         let inner = self.inner.clone();
         let table = table.to_owned();
-        py.allow_threads(|| {
+        let schema = py.detach(|| {
+            let _rt = runtime().enter();
+            inner.lock().get_schema(&table).into_pyresult()
+        })?;
+        let batches = conversion::python_to_batches(py, data, Some(schema.as_ref()))?;
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let mut total = 0u64;
@@ -62,10 +68,17 @@ impl PyConnection {
     /// Insert JSON string data into a source.
     fn insert_json(&self, py: Python<'_>, table: &str, data: &str) -> PyResult<u64> {
         self.check_closed()?;
-        let batches = conversion::json_str_to_batches(data)?;
         let inner = self.inner.clone();
         let table = table.to_owned();
-        py.allow_threads(|| {
+        let schema = py.detach(|| {
+            let _rt = runtime().enter();
+            inner.lock().get_schema(&table).into_pyresult()
+        })?;
+        let batches = conversion::align_batches_to_schema(
+            conversion::json_str_to_batches(data)?,
+            Some(schema.as_ref()),
+        )?;
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let mut total = 0u64;
@@ -79,10 +92,17 @@ impl PyConnection {
     /// Insert CSV string data into a source.
     fn insert_csv(&self, py: Python<'_>, table: &str, data: &str) -> PyResult<u64> {
         self.check_closed()?;
-        let batches = conversion::csv_str_to_batches(data)?;
         let inner = self.inner.clone();
         let table = table.to_owned();
-        py.allow_threads(|| {
+        let schema = py.detach(|| {
+            let _rt = runtime().enter();
+            inner.lock().get_schema(&table).into_pyresult()
+        })?;
+        let batches = conversion::align_batches_to_schema(
+            conversion::csv_str_to_batches(data)?,
+            Some(schema.as_ref()),
+        )?;
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let mut total = 0u64;
@@ -98,7 +118,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let table = table.to_owned();
-        let writer = py.allow_threads(|| {
+        let writer = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.writer(&table).into_pyresult()
@@ -115,7 +135,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let result = conn.execute(&sql).into_pyresult()?;
@@ -146,7 +166,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
-        let stream = py.allow_threads(|| {
+        let stream = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.query_stream(&sql).into_pyresult()
@@ -161,7 +181,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
-        let stream = py.allow_threads(|| {
+        let stream = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.query_stream(&sql).into_pyresult()
@@ -193,8 +213,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let name = name.to_owned();
-        let sub = py.allow_threads(|| {
-            let _rt = runtime().enter();
+        let sub = py.detach(|| {
             let conn = inner.lock();
             conn.subscribe(&name).into_pyresult()
         })?;
@@ -215,11 +234,17 @@ impl PyConnection {
         let inner = self.inner.clone();
         let name = name.to_owned();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let _rt = runtime().enter();
-            let sub = {
+            let handle = tokio::runtime::Handle::current();
+            let sub = tokio::task::spawn_blocking(move || {
                 let conn = inner.lock();
-                conn.subscribe(&name).into_pyresult()?
-            };
+                handle.block_on(conn.subscribe_async(&name)).into_pyresult()
+            })
+            .await
+            .map_err(|error| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Subscription task join error: {error}"
+                ))
+            })??;
             Ok(AsyncStreamSubscription::from_core(sub))
         })
     }
@@ -235,13 +260,13 @@ impl PyConnection {
         &self,
         py: Python<'_>,
         sql: &str,
-        on_data: PyObject,
-        on_error: Option<PyObject>,
+        on_data: Py<PyAny>,
+        on_error: Option<Py<PyAny>>,
     ) -> PyResult<CallbackSubscription> {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
-        let stream = py.allow_threads(|| {
+        let stream = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.query_stream(&sql).into_pyresult()
@@ -262,14 +287,13 @@ impl PyConnection {
         &self,
         py: Python<'_>,
         name: &str,
-        on_data: PyObject,
-        on_error: Option<PyObject>,
+        on_data: Py<PyAny>,
+        on_error: Option<Py<PyAny>>,
     ) -> PyResult<CallbackSubscription> {
         self.check_closed()?;
         let inner = self.inner.clone();
         let name = name.to_owned();
-        let sub = py.allow_threads(|| {
-            let _rt = runtime().enter();
+        let sub = py.detach(|| {
             let conn = inner.lock();
             conn.subscribe(&name).into_pyresult()
         })?;
@@ -283,7 +307,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let table = table.to_owned();
-        let schema: SchemaRef = py.allow_threads(|| {
+        let schema: SchemaRef = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             // Try source first, then fall back to stream SQL definition.
@@ -339,7 +363,7 @@ impl PyConnection {
         let col_defs = columns.join(", ");
         let inner = self.inner.clone();
         let name = name.to_owned();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let ddl = format!("CREATE SOURCE {} ({})", name, col_defs);
@@ -352,7 +376,7 @@ impl PyConnection {
     fn list_tables(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.list_sources())
@@ -363,7 +387,7 @@ impl PyConnection {
     fn list_streams(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.list_streams())
@@ -374,7 +398,7 @@ impl PyConnection {
     fn list_sinks(&self, py: Python<'_>) -> PyResult<Vec<String>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.list_sinks())
@@ -385,7 +409,7 @@ impl PyConnection {
     fn start(&self, py: Python<'_>) -> PyResult<()> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.start().into_pyresult()
@@ -402,7 +426,7 @@ impl PyConnection {
     fn checkpoint(&self, py: Python<'_>) -> PyResult<PyCheckpointResult> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        let id = py.allow_threads(|| {
+        let id = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.checkpoint().into_pyresult()
@@ -415,7 +439,7 @@ impl PyConnection {
     fn is_checkpoint_enabled(&self, py: Python<'_>) -> PyResult<bool> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.is_checkpoint_enabled())
@@ -428,7 +452,7 @@ impl PyConnection {
     fn sources(&self, py: Python<'_>) -> PyResult<Vec<PySourceInfo>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn
@@ -443,7 +467,7 @@ impl PyConnection {
     fn sinks(&self, py: Python<'_>) -> PyResult<Vec<PySinkInfo>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn
@@ -458,7 +482,7 @@ impl PyConnection {
     fn streams(&self, py: Python<'_>) -> PyResult<Vec<PyStreamInfo>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn
@@ -473,7 +497,7 @@ impl PyConnection {
     fn queries(&self, py: Python<'_>) -> PyResult<Vec<PyQueryInfo>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn
@@ -490,7 +514,7 @@ impl PyConnection {
     fn topology(&self, py: Python<'_>) -> PyResult<PyPipelineTopology> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(PyPipelineTopology::from_core(conn.pipeline_topology()))
@@ -502,7 +526,7 @@ impl PyConnection {
     fn pipeline_state(&self, py: Python<'_>) -> PyResult<String> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.pipeline_state())
@@ -514,7 +538,7 @@ impl PyConnection {
     fn pipeline_watermark(&self, py: Python<'_>) -> PyResult<i64> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.pipeline_watermark())
@@ -526,7 +550,7 @@ impl PyConnection {
     fn total_events_processed(&self, py: Python<'_>) -> PyResult<u64> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.total_events_processed())
@@ -538,7 +562,7 @@ impl PyConnection {
     fn source_count(&self, py: Python<'_>) -> PyResult<usize> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.source_count())
@@ -550,7 +574,7 @@ impl PyConnection {
     fn sink_count(&self, py: Python<'_>) -> PyResult<usize> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.sink_count())
@@ -562,7 +586,7 @@ impl PyConnection {
     fn active_query_count(&self, py: Python<'_>) -> PyResult<usize> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.active_query_count())
@@ -575,7 +599,7 @@ impl PyConnection {
     fn metrics(&self, py: Python<'_>) -> PyResult<PyPipelineMetrics> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(PyPipelineMetrics::from_core(conn.metrics()))
@@ -587,7 +611,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let name = name.to_owned();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.source_metrics(&name).map(PySourceMetrics::from_core))
@@ -598,7 +622,7 @@ impl PyConnection {
     fn all_source_metrics(&self, py: Python<'_>) -> PyResult<Vec<PySourceMetrics>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn
@@ -614,7 +638,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let name = name.to_owned();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn.stream_metrics(&name).map(PyStreamMetrics::from_core))
@@ -625,7 +649,7 @@ impl PyConnection {
     fn all_stream_metrics(&self, py: Python<'_>) -> PyResult<Vec<PyStreamMetrics>> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             Ok(conn
@@ -642,7 +666,7 @@ impl PyConnection {
     fn cancel_query(&self, py: Python<'_>, query_id: u64) -> PyResult<()> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.cancel_query(query_id).into_pyresult()
@@ -655,7 +679,7 @@ impl PyConnection {
     fn shutdown(&self, py: Python<'_>) -> PyResult<()> {
         self.check_closed()?;
         let inner = self.inner.clone();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.shutdown().into_pyresult()
@@ -671,7 +695,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let sql = sql.to_owned();
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let result = conn.execute(&sql).into_pyresult()?;
@@ -684,7 +708,7 @@ impl PyConnection {
         if !self.closed {
             self.closed = true;
             let inner = self.inner.clone();
-            py.allow_threads(|| -> PyResult<()> {
+            py.detach(|| -> PyResult<()> {
                 let _rt = runtime().enter();
                 match Arc::try_unwrap(inner) {
                     Ok(mutex) => {
@@ -754,7 +778,7 @@ impl PyConnection {
         let inner = self.inner.clone();
         let name = name.to_owned();
         let filter = filter.map(|f| f.to_owned());
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             let stream_sql = conn
@@ -828,7 +852,7 @@ impl PyConnection {
         self.check_closed()?;
         let inner = self.inner.clone();
         let table_owned = table.to_owned();
-        let metrics = py.allow_threads(|| {
+        let metrics = py.detach(|| {
             let _rt = runtime().enter();
             let conn = inner.lock();
             conn.source_metrics(&table_owned)
@@ -926,7 +950,7 @@ unsafe impl Sync for QueryStreamIter {}
 impl QueryStreamIter {
     /// Non-blocking poll for the next result batch.
     fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = runtime().enter();
             let mut stream = self.inner.lock();
             match stream.try_next().into_pyresult()? {
@@ -945,7 +969,7 @@ impl QueryStreamIter {
 
     /// Cancel the stream.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut stream = self.inner.lock();
             stream.cancel();
             Ok(())
@@ -966,7 +990,7 @@ impl QueryStreamIter {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        let result = py.allow_threads(|| {
+        let result = py.detach(|| {
             let _rt = runtime().enter();
             let mut stream = self.inner.lock();
             stream.next().into_pyresult()

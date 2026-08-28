@@ -75,7 +75,7 @@ class TestExceptionCodeAttribute:
     def test_checkpoint_error_has_code(self, tmp_path):
         conn = laminardb.open(str(tmp_path / "test.db"))
         try:
-            with pytest.raises(laminardb.LaminarError) as exc_info:
+            with pytest.raises(laminardb.CheckpointError) as exc_info:
                 conn.checkpoint()
             assert hasattr(exc_info.value, "code")
             assert isinstance(exc_info.value.code, int)

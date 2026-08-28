@@ -11,6 +11,7 @@ Key classes:
     AsyncSubscription  Asynchronous continuous query subscription.
     StreamSubscription  Synchronous named-stream subscription.
     AsyncStreamSubscription  Asynchronous named-stream subscription.
+    SubscriptionFrame  Named-stream data or checkpoint-barrier frame.
     CallbackSubscription  Push-based subscription with callbacks.
     MaterializedView  High-level wrapper for named streams.
     Schema          Convenience wrapper around PyArrow Schema.
@@ -67,6 +68,7 @@ from laminardb._laminardb import (
     StreamSubscription,
     Subscription,
     SubscriptionError,
+    SubscriptionFrame,
     Writer,
     __version__,
     codes,
@@ -165,6 +167,7 @@ __all__ = [
     "StreamSubscription",
     "AsyncStreamSubscription",
     "CallbackSubscription",
+    "SubscriptionFrame",
     # High-level types
     "MaterializedView",
     "Schema",

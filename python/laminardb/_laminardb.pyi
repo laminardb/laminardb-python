@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 if TYPE_CHECKING:
-    import pandas
-    import polars  # type: ignore[import-not-found]
+    import pandas  # type: ignore[import-untyped]
+    import polars
     import pyarrow  # type: ignore[import-untyped]
 
 __version__: str
@@ -645,6 +645,36 @@ class AsyncSubscription:
         ...
 
 # ---------------------------------------------------------------------------
+# Named-stream subscription frames
+# ---------------------------------------------------------------------------
+
+class SubscriptionFrame:
+    """A data batch or durable checkpoint barrier from a named stream."""
+
+    @property
+    def kind(self) -> Literal["batch", "barrier"]:
+        """Either ``"batch"`` or ``"barrier"``."""
+        ...
+    @property
+    def sequence(self) -> int:
+        """Portal-local delivery sequence (not durable or cluster-global)."""
+        ...
+    @property
+    def batch(self) -> QueryResult | None: ...
+    @property
+    def epoch(self) -> int | None: ...
+    @property
+    def checkpoint_id(self) -> int | None: ...
+    @property
+    def through_sequence(self) -> int | None: ...
+    @property
+    def is_batch(self) -> bool: ...
+    @property
+    def is_barrier(self) -> bool: ...
+
+    def __repr__(self) -> str: ...
+
+# ---------------------------------------------------------------------------
 # StreamSubscription (true named-stream subscription)
 # ---------------------------------------------------------------------------
 
@@ -663,8 +693,20 @@ class StreamSubscription:
         """The subscription schema as a PyArrow Schema."""
         ...
 
+    def next_frame(self) -> SubscriptionFrame | None:
+        """Block until the next data or durable checkpoint frame."""
+        ...
+
+    def next_frame_timeout(self, timeout_ms: int) -> SubscriptionFrame | None:
+        """Wait up to ``timeout_ms`` milliseconds for the next frame."""
+        ...
+
+    def try_next_frame(self) -> SubscriptionFrame | None:
+        """Non-blocking poll for the next frame."""
+        ...
+
     def next(self) -> QueryResult | None:
-        """Blocking wait for the next batch."""
+        """Blocking wait for the next data batch, skipping barriers."""
         ...
 
     def next_timeout(self, timeout_ms: int) -> QueryResult | None:
@@ -711,7 +753,7 @@ class CallbackSubscription:
         ...
 
     def wait(self) -> None:
-        """Block until the background thread exits. Releases the GIL."""
+        """Block until the background thread exits without holding Python."""
         ...
 
     def __repr__(self) -> str: ...
@@ -731,8 +773,16 @@ class AsyncStreamSubscription:
         """The subscription schema as a PyArrow Schema."""
         ...
 
+    async def next_frame(self) -> SubscriptionFrame | None:
+        """Await the next data or durable checkpoint frame."""
+        ...
+
+    def try_next_frame(self) -> SubscriptionFrame | None:
+        """Non-blocking poll for the next frame."""
+        ...
+
     def next(self) -> QueryResult | None:
-        """Blocking wait for the next batch."""
+        """Blocking wait for the next data batch, skipping barriers."""
         ...
 
     def next_timeout(self, timeout_ms: int) -> QueryResult | None:
@@ -893,9 +943,9 @@ class PipelineMetrics:
     @property
     def pipeline_watermark(self) -> int: ...
     @property
-    def last_cycle_duration_ns(self) -> int:
-        """Duration of the last pipeline cycle in nanoseconds."""
-        ...
+    def mv_updates(self) -> int: ...
+    @property
+    def mv_bytes_stored(self) -> int: ...
 
     def __repr__(self) -> str: ...
 
@@ -926,14 +976,6 @@ class StreamMetrics:
     def name(self) -> str: ...
     @property
     def total_events(self) -> int: ...
-    @property
-    def pending(self) -> int: ...
-    @property
-    def capacity(self) -> int: ...
-    @property
-    def is_backpressured(self) -> bool: ...
-    @property
-    def watermark(self) -> int: ...
     @property
     def sql(self) -> str | None: ...
 

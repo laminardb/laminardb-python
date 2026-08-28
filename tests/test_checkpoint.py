@@ -9,7 +9,7 @@ class TestCheckpointDisabled:
     """Tests for checkpoint operations when checkpointing is disabled (default)."""
 
     def test_checkpoint_raises_when_disabled(self, db):
-        with pytest.raises(laminardb.LaminarError):
+        with pytest.raises(laminardb.CheckpointError):
             db.checkpoint()
 
     def test_is_checkpoint_enabled_false(self, db):
@@ -32,6 +32,7 @@ class TestCheckpointEnabled:
             "events",
             {"ts": "int64", "value": "float64"},
         )
+        conn.execute("CREATE STREAM checkpointed AS SELECT * FROM events")
         conn.start()
         yield conn
         conn.close()

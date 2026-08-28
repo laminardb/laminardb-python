@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 /// Example:
 ///     config = laminardb.LaminarConfig(buffer_size=1024)
 ///     conn = laminardb.open("mydb", config=config)
-#[pyclass(name = "LaminarConfig")]
+#[pyclass(name = "LaminarConfig", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyLaminarConfig {
     buffer_size: usize,

@@ -2,7 +2,7 @@
 
 Single source-of-truth mapping every Rust feature to its Python binding status.
 
-**Current version**: 0.15.0
+**Current version**: 0.30.0
 
 ---
 
@@ -96,6 +96,9 @@ Single source-of-truth mapping every Rust feature to its Python binding status.
 | Async subscription | `await conn.subscribe_async(sql)` | Implemented |
 | Named stream (sync) | `conn.subscribe_stream(name)` | Implemented |
 | Named stream (async) | `await conn.subscribe_stream_async(name)` | Implemented |
+| Data/checkpoint frames | `sub.next_frame()` / `await sub.next_frame()` | Implemented |
+| Non-blocking frame poll | `sub.try_next_frame()` | Implemented |
+| Frame timeout (sync) | `sub.next_frame_timeout(ms)` | Implemented |
 | Non-blocking poll | `sub.try_next()` | Implemented |
 | Timeout poll | `sub.next_timeout(ms)` | Implemented |
 | Blocking next | `sub.next()` | Implemented |
@@ -164,10 +167,13 @@ Connectors are used via SQL DDL from Python. The Python bindings expose all conn
 | WebSocket | yes | yes | `websocket` | Available via SQL DDL |
 | PostgreSQL CDC | yes | -- | `postgres-cdc` | Available via SQL DDL |
 | PostgreSQL Sink | -- | yes | `postgres-sink` | Available via SQL DDL |
-| MySQL CDC | yes | -- | `mysql-cdc` | Available via SQL DDL |
 | Delta Lake | yes | yes | `delta-lake` | Available via SQL DDL |
 | Apache Iceberg | -- | yes | `iceberg` | Available via SQL DDL |
 | Parquet Lookup | yes | -- | `parquet-lookup` | Available via SQL DDL |
+| Files | yes | yes | `files` | Available via SQL DDL |
+| MongoDB CDC | yes | yes | `mongodb-cdc` | Available via SQL DDL |
+| OpenTelemetry | yes | -- | `otel` | Available via SQL DDL |
+| NATS | yes | yes | `nats` | Available via SQL DDL |
 
 ---
 
@@ -277,7 +283,7 @@ LaminarError (base)
 | Core API (Connection methods) | 40+ methods, 100% of Rust `api` module |
 | Input formats | 10/10 |
 | Output formats | 6/6 + fetch methods |
-| Connectors (via SQL DDL) | 8/8 compiled connectors |
+| Connectors (via SQL DDL) | All connectors enabled in `Cargo.toml` |
 | Error codes | 17/17 |
 | Exception types | 9/9 |
 | Subscription types | 4/4 (sync, async, stream sync, stream async) |

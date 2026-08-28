@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the LaminarDB Python bindings!
 
 ## Prerequisites
 
-- **Rust 1.85+** (stable) — [rustup.rs](https://rustup.rs)
+- **Rust 1.95+** (stable) — [rustup.rs](https://rustup.rs)
 - **Python 3.11+** — [python.org](https://www.python.org/downloads/)
 - **maturin** — `pip install maturin`
 - **System dependencies** — protobuf compiler (`protoc`), OpenSSL dev headers, pkg-config
@@ -52,6 +52,9 @@ maturin develop --extras dev
 
 This compiles the Rust extension and installs it into your virtualenv along with dev dependencies (pytest, mypy, pandas, polars, pyarrow).
 
+On `x86_64-pc-windows-msvc`, `.cargo/config.toml` selects the
+toolchain-provided `rust-lld`; no machine-specific linker path is required.
+
 ## Running Checks
 
 ### Tests
@@ -89,7 +92,7 @@ The Python package consists of two layers:
 
 ### Key patterns
 
-- **`py.allow_threads()`** — Every blocking Rust call releases the GIL so other Python threads can run
+- **`py.detach()`** — Every blocking Rust call detaches from the interpreter so other Python threads can run
 - **`Arc<Mutex<Connection>>`** — The core connection is thread-safe and shareable
 - **`conversion.rs`** — Handles all 10 input formats (dict, list, DataFrame, Arrow, JSON, CSV)
 - **`pyo3-arrow`** — Zero-copy Arrow ↔ PyArrow conversion via PyCapsule interface

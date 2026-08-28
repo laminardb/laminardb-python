@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
 
 use crate::async_support::runtime;
 use crate::query::QueryResult;
@@ -24,11 +25,31 @@ enum SubscriptionKind {
     Stream(laminar_db::api::ArrowSubscription),
 }
 
+struct SubscriptionBatch {
+    batch: arrow_array::RecordBatch,
+    lease: Option<laminar_db::subscription::SubscriptionFrameLease>,
+}
+
 impl SubscriptionKind {
-    fn try_next(&mut self) -> Result<Option<arrow_array::RecordBatch>, laminar_db::api::ApiError> {
+    fn try_next(&mut self) -> Result<Option<SubscriptionBatch>, laminar_db::api::ApiError> {
         match self {
-            Self::Query(s) => s.try_next(),
-            Self::Stream(s) => s.try_next(),
+            Self::Query(stream) => Ok(stream
+                .try_next()?
+                .map(|batch| SubscriptionBatch { batch, lease: None })),
+            Self::Stream(stream) => loop {
+                match stream.try_next_frame()? {
+                    Some(laminar_db::api::ArrowSubscriptionFrame::Batch {
+                        batch, lease, ..
+                    }) => {
+                        return Ok(Some(SubscriptionBatch {
+                            batch,
+                            lease: Some(lease),
+                        }));
+                    }
+                    Some(laminar_db::api::ArrowSubscriptionFrame::Barrier { .. }) => {}
+                    None => return Ok(None),
+                }
+            },
         }
     }
 
@@ -91,7 +112,7 @@ impl CallbackSubscription {
     fn wait(&self, py: Python<'_>) -> PyResult<()> {
         let handle = self.thread.lock().take();
         if let Some(h) = handle {
-            py.allow_threads(|| {
+            py.detach(|| {
                 let _ = h.join();
             });
         }
@@ -110,7 +131,7 @@ impl CallbackSubscription {
     fn __del__(&self) {
         // Set the cancel flag so the background thread will exit.
         // Do NOT join here — the background thread may be inside
-        // Python::with_gil() while the GC holds the GIL, which
+        // Python::try_attach() while the GC holds the interpreter lock, which
         // would deadlock.
         self.cancelled.store(true, Ordering::Relaxed);
     }
@@ -123,24 +144,24 @@ impl CallbackSubscription {
 impl CallbackSubscription {
     pub(crate) fn from_query_stream(
         stream: laminar_db::api::QueryStream,
-        on_data: PyObject,
-        on_error: Option<PyObject>,
+        on_data: Py<PyAny>,
+        on_error: Option<Py<PyAny>>,
     ) -> Self {
         Self::spawn(SubscriptionKind::Query(stream), on_data, on_error, "query")
     }
 
     pub(crate) fn from_arrow_subscription(
         sub: laminar_db::api::ArrowSubscription,
-        on_data: PyObject,
-        on_error: Option<PyObject>,
+        on_data: Py<PyAny>,
+        on_error: Option<Py<PyAny>>,
     ) -> Self {
         Self::spawn(SubscriptionKind::Stream(sub), on_data, on_error, "stream")
     }
 
     fn spawn(
         mut sub: SubscriptionKind,
-        on_data: PyObject,
-        on_error: Option<PyObject>,
+        on_data: Py<PyAny>,
+        on_error: Option<Py<PyAny>>,
         kind: &str,
     ) -> Self {
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -174,8 +195,8 @@ impl CallbackSubscription {
 fn callback_thread_loop(
     sub: &mut SubscriptionKind,
     cancelled: &AtomicBool,
-    on_data: &PyObject,
-    on_error: &Option<PyObject>,
+    on_data: &Py<PyAny>,
+    on_error: &Option<Py<PyAny>>,
 ) {
     loop {
         if cancelled.load(Ordering::Relaxed) {
@@ -189,11 +210,15 @@ fn callback_thread_loop(
 
         match sub.try_next() {
             Ok(Some(batch)) => {
-                let result = QueryResult::from_batch(batch);
-                let should_stop = Python::with_gil(|py| match on_data.call1(py, (result,)) {
+                let result = match batch.lease {
+                    Some(lease) => QueryResult::from_subscription_batch(batch.batch, lease),
+                    None => QueryResult::from_batch(batch.batch),
+                };
+                let should_stop = Python::try_attach(|py| match on_data.call1(py, (result,)) {
                     Ok(_) => false,
                     Err(e) => handle_callback_error(py, e, on_error),
-                });
+                })
+                .unwrap_or(true);
                 if should_stop {
                     sub.cancel();
                     break;
@@ -204,10 +229,11 @@ fn callback_thread_loop(
                 thread::sleep(Duration::from_millis(1));
             }
             Err(e) => {
-                let should_stop = Python::with_gil(|py| {
+                let should_stop = Python::try_attach(|py| {
                     let py_err = crate::error::core_error_to_pyerr(e);
                     handle_callback_error(py, py_err, on_error)
-                });
+                })
+                .unwrap_or(true);
                 if should_stop {
                     sub.cancel();
                     break;
@@ -218,7 +244,7 @@ fn callback_thread_loop(
 }
 
 /// Route an error to on_error if provided; returns `true` if the loop should stop.
-fn handle_callback_error(py: Python<'_>, error: PyErr, on_error: &Option<PyObject>) -> bool {
+fn handle_callback_error(py: Python<'_>, error: PyErr, on_error: &Option<Py<PyAny>>) -> bool {
     match on_error {
         Some(handler) => {
             let msg = error.to_string();

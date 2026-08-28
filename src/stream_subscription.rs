@@ -1,12 +1,11 @@
-//! True stream subscription bindings wrapping `laminar_db::api::ArrowSubscription`.
+//! Named-stream subscription bindings for the framed LaminarDB subscription API.
 //!
-//! Unlike `Subscription` / `AsyncSubscription` (which wrap `QueryStream` from
-//! `query_stream(sql)`), these classes wrap `ArrowSubscription` obtained from
-//! `Connection::subscribe(stream_name)` — a true continuous subscription to a
-//! named stream created via `CREATE STREAM ... AS SELECT ...`.
+//! The v0.30 core emits both data batches and durable checkpoint barriers. The
+//! frame methods expose that protocol directly. Existing batch-only methods and
+//! iterator behavior remain as conveniences and skip barrier frames.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pyo3::exceptions::{PyStopAsyncIteration, PyStopIteration};
@@ -17,41 +16,217 @@ use crate::async_support::{SyncCell, runtime};
 use crate::error::IntoPyResult;
 use crate::query::QueryResult;
 
-// ---------------------------------------------------------------------------
-// Synchronous StreamSubscription
-// ---------------------------------------------------------------------------
+type CoreFrame = laminar_db::api::ArrowSubscriptionFrame;
+type CoreSubscription = laminar_db::api::ArrowSubscription;
 
-/// A synchronous subscription to a named stream.
-///
-/// Wraps `laminar_db::api::ArrowSubscription` as a Python iterator.
-/// Created via `Connection.subscribe_stream(name)`.
-#[pyclass(name = "StreamSubscription")]
-pub struct StreamSubscription {
-    inner: Mutex<Option<laminar_db::api::ArrowSubscription>>,
+/// A data or durable-progress frame from a named stream subscription.
+#[pyclass(name = "SubscriptionFrame", frozen)]
+pub struct SubscriptionFrame {
+    kind: &'static str,
+    sequence: u64,
+    batch: Option<QueryResult>,
+    epoch: Option<u64>,
+    checkpoint_id: Option<u64>,
+    through_sequence: Option<u64>,
 }
 
-// Safety: ArrowSubscription is Send. We protect shared access with Mutex.
+#[pymethods]
+impl SubscriptionFrame {
+    /// `"batch"` for rows or `"barrier"` for durable progress.
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// Portal-local delivery sequence; it is not durable or cluster-global.
+    #[getter]
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    /// Rows carried by a batch frame, otherwise `None`.
+    #[getter]
+    fn batch(&self) -> Option<QueryResult> {
+        self.batch.clone()
+    }
+
+    /// Checkpoint epoch for a barrier frame, otherwise `None`.
+    #[getter]
+    fn epoch(&self) -> Option<u64> {
+        self.epoch
+    }
+
+    /// Checkpoint identifier for a barrier frame, otherwise `None`.
+    #[getter]
+    fn checkpoint_id(&self) -> Option<u64> {
+        self.checkpoint_id
+    }
+
+    /// Local-log cut represented by a barrier frame, otherwise `None`.
+    #[getter]
+    fn through_sequence(&self) -> Option<u64> {
+        self.through_sequence
+    }
+
+    #[getter]
+    fn is_batch(&self) -> bool {
+        self.kind == "batch"
+    }
+
+    #[getter]
+    fn is_barrier(&self) -> bool {
+        self.kind == "barrier"
+    }
+
+    fn __repr__(&self) -> String {
+        match &self.batch {
+            Some(batch) => format!(
+                "SubscriptionFrame(kind='batch', sequence={}, rows={})",
+                self.sequence,
+                batch.row_count()
+            ),
+            None => format!(
+                "SubscriptionFrame(kind='barrier', sequence={}, epoch={}, checkpoint_id={}, through_sequence={})",
+                self.sequence,
+                self.epoch.unwrap_or_default(),
+                self.checkpoint_id.unwrap_or_default(),
+                self.through_sequence.unwrap_or_default()
+            ),
+        }
+    }
+}
+
+impl SubscriptionFrame {
+    fn from_core(frame: CoreFrame) -> Self {
+        match frame {
+            CoreFrame::Batch {
+                batch,
+                sequence,
+                lease,
+            } => Self {
+                kind: "batch",
+                sequence,
+                batch: Some(QueryResult::from_subscription_batch(batch, lease)),
+                epoch: None,
+                checkpoint_id: None,
+                through_sequence: None,
+            },
+            CoreFrame::Barrier {
+                sequence,
+                epoch,
+                checkpoint_id,
+                through_sequence,
+            } => Self {
+                kind: "barrier",
+                sequence,
+                batch: None,
+                epoch: Some(epoch),
+                checkpoint_id: Some(checkpoint_id),
+                through_sequence: Some(through_sequence),
+            },
+        }
+    }
+}
+
+fn frame_batch(frame: CoreFrame) -> Option<QueryResult> {
+    match frame {
+        CoreFrame::Batch { batch, lease, .. } => {
+            Some(QueryResult::from_subscription_batch(batch, lease))
+        }
+        CoreFrame::Barrier { .. } => None,
+    }
+}
+
+fn next_batch(
+    sub: &mut CoreSubscription,
+) -> Result<Option<QueryResult>, laminar_db::api::ApiError> {
+    loop {
+        let Some(frame) = sub.next_frame()? else {
+            return Ok(None);
+        };
+        if let Some(batch) = frame_batch(frame) {
+            return Ok(Some(batch));
+        }
+    }
+}
+
+async fn next_batch_async(
+    sub: &mut CoreSubscription,
+) -> Result<Option<QueryResult>, laminar_db::api::ApiError> {
+    loop {
+        let Some(frame) = sub.next_frame_async().await? else {
+            return Ok(None);
+        };
+        if let Some(batch) = frame_batch(frame) {
+            return Ok(Some(batch));
+        }
+    }
+}
+
+fn try_next_batch(
+    sub: &mut CoreSubscription,
+) -> Result<Option<QueryResult>, laminar_db::api::ApiError> {
+    loop {
+        let Some(frame) = sub.try_next_frame()? else {
+            return Ok(None);
+        };
+        if let Some(batch) = frame_batch(frame) {
+            return Ok(Some(batch));
+        }
+    }
+}
+
+fn next_frame_timeout(
+    sub: &mut CoreSubscription,
+    timeout: Duration,
+) -> Result<Option<CoreFrame>, laminar_db::api::ApiError> {
+    runtime().block_on(async {
+        tokio::time::timeout(timeout, sub.next_frame_async())
+            .await
+            .unwrap_or_else(|_| Err(laminar_db::api::ApiError::subscription_timeout()))
+    })
+}
+
+fn next_batch_timeout(
+    sub: &mut CoreSubscription,
+    timeout: Duration,
+) -> Result<Option<QueryResult>, laminar_db::api::ApiError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Some(frame) = next_frame_timeout(sub, remaining)? else {
+            return Ok(None);
+        };
+        if let Some(batch) = frame_batch(frame) {
+            return Ok(Some(batch));
+        }
+    }
+}
+
+/// A synchronous subscription to a named stream.
+#[pyclass(name = "StreamSubscription")]
+pub struct StreamSubscription {
+    inner: Mutex<Option<CoreSubscription>>,
+}
+
+// SAFETY: CoreSubscription is Send and all shared access is serialized.
 unsafe impl Send for StreamSubscription {}
 unsafe impl Sync for StreamSubscription {}
 
 #[pymethods]
 impl StreamSubscription {
-    /// Whether the subscription is still active.
     #[getter]
     fn is_active(&self) -> bool {
         let guard = self.inner.lock();
-        guard.as_ref().is_some_and(|s| s.is_active())
+        guard.as_ref().is_some_and(CoreSubscription::is_active)
     }
 
-    /// The schema of the subscription as a PyArrow Schema.
     #[getter]
     fn schema(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let guard = self.inner.lock();
         match guard.as_ref() {
             Some(sub) => {
-                let schema = sub.schema();
-                let py_schema = PySchema::from(schema);
-                let obj = py_schema.into_pyarrow(py)?;
+                let obj = PySchema::from(sub.schema()).into_pyarrow(py)?;
                 Ok(obj.into_pyobject(py)?.into_any().unbind())
             }
             None => Err(pyo3::exceptions::PyRuntimeError::new_err(
@@ -60,64 +235,93 @@ impl StreamSubscription {
         }
     }
 
-    /// Blocking wait for the next batch.
+    /// Blocking wait for the next data or checkpoint frame.
+    fn next_frame(&self, py: Python<'_>) -> PyResult<Option<SubscriptionFrame>> {
+        py.detach(|| {
+            let mut guard = self.inner.lock();
+            match guard.as_mut() {
+                Some(sub) => Ok(sub
+                    .next_frame()
+                    .into_pyresult()?
+                    .map(SubscriptionFrame::from_core)),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Non-blocking poll for the next data or checkpoint frame.
+    fn try_next_frame(&self, py: Python<'_>) -> PyResult<Option<SubscriptionFrame>> {
+        py.detach(|| {
+            let mut guard = self.inner.lock();
+            match guard.as_mut() {
+                Some(sub) => Ok(sub
+                    .try_next_frame()
+                    .into_pyresult()?
+                    .map(SubscriptionFrame::from_core)),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Wait for a frame for at most `timeout_ms` milliseconds.
+    fn next_frame_timeout(
+        &self,
+        py: Python<'_>,
+        timeout_ms: u64,
+    ) -> PyResult<Option<SubscriptionFrame>> {
+        py.detach(|| {
+            let mut guard = self.inner.lock();
+            match guard.as_mut() {
+                Some(sub) => Ok(next_frame_timeout(sub, Duration::from_millis(timeout_ms))
+                    .into_pyresult()?
+                    .map(SubscriptionFrame::from_core)),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Blocking wait for the next data batch, skipping barrier frames.
     fn next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
+        py.detach(|| {
             let mut guard = self.inner.lock();
             match guard.as_mut() {
-                Some(sub) => match sub.next().into_pyresult()? {
-                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
-                    None => Ok(None),
-                },
+                Some(sub) => next_batch(sub).into_pyresult(),
                 None => Ok(None),
             }
         })
     }
 
-    /// Blocking wait for the next batch with a timeout in milliseconds.
-    ///
-    /// Raises `SubscriptionError` (code `SUBSCRIPTION_TIMEOUT`) if the
-    /// timeout expires without data.  Returns `None` only when the
-    /// subscription stream itself has ended.
+    /// Wait for a data batch for at most `timeout_ms`, skipping barriers.
     fn next_timeout(&self, py: Python<'_>, timeout_ms: u64) -> PyResult<Option<QueryResult>> {
-        let timeout = Duration::from_millis(timeout_ms);
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
+        py.detach(|| {
             let mut guard = self.inner.lock();
             match guard.as_mut() {
-                Some(sub) => match sub.next_timeout(timeout).into_pyresult()? {
-                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
-                    None => Ok(None),
-                },
+                Some(sub) => {
+                    next_batch_timeout(sub, Duration::from_millis(timeout_ms)).into_pyresult()
+                }
                 None => Ok(None),
             }
         })
     }
 
-    /// Non-blocking poll for the next batch.
+    /// Non-blocking poll for the next data batch, skipping barriers.
     fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
+        py.detach(|| {
             let mut guard = self.inner.lock();
             match guard.as_mut() {
-                Some(sub) => match sub.try_next().into_pyresult()? {
-                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
-                    None => Ok(None),
-                },
+                Some(sub) => try_next_batch(sub).into_pyresult(),
                 None => Ok(None),
             }
         })
     }
 
-    /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut guard = self.inner.lock();
             if let Some(sub) = guard.as_mut() {
                 sub.cancel();
             }
-            let _ = guard.take();
+            guard.take();
             Ok(())
         })
     }
@@ -125,7 +329,7 @@ impl StreamSubscription {
     fn __repr__(&self) -> String {
         let guard = self.inner.lock();
         match guard.as_ref() {
-            Some(s) if s.is_active() => "StreamSubscription(active)".to_owned(),
+            Some(sub) if sub.is_active() => "StreamSubscription(active)".to_owned(),
             Some(_) => "StreamSubscription(finished)".to_owned(),
             None => "StreamSubscription(cancelled)".to_owned(),
         }
@@ -136,17 +340,7 @@ impl StreamSubscription {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<QueryResult> {
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
-            let mut guard = self.inner.lock();
-            match guard.as_mut() {
-                Some(sub) if sub.is_active() => match sub.next().into_pyresult()? {
-                    Some(batch) => Ok(QueryResult::from_batch(batch)),
-                    None => Err(PyStopIteration::new_err(())),
-                },
-                _ => Err(PyStopIteration::new_err(())),
-            }
-        })
+        self.next(py)?.ok_or_else(|| PyStopIteration::new_err(()))
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -173,44 +367,33 @@ impl StreamSubscription {
 }
 
 impl StreamSubscription {
-    pub fn from_core(sub: laminar_db::api::ArrowSubscription) -> Self {
+    pub fn from_core(sub: CoreSubscription) -> Self {
         Self {
             inner: Mutex::new(Some(sub)),
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Asynchronous AsyncStreamSubscription
-// ---------------------------------------------------------------------------
-
 /// An asynchronous subscription to a named stream.
-///
-/// Wraps `laminar_db::api::ArrowSubscription` as a Python async iterator.
-/// Created via `Connection.subscribe_stream_async(name)`.
 #[pyclass(name = "AsyncStreamSubscription")]
 pub struct AsyncStreamSubscription {
-    inner: Arc<SyncCell<laminar_db::api::ArrowSubscription>>,
+    inner: Arc<SyncCell<CoreSubscription>>,
 }
 
 #[pymethods]
 impl AsyncStreamSubscription {
-    /// Whether the subscription is still active.
     #[getter]
     fn is_active(&self) -> bool {
         let guard = self.inner.0.lock();
-        guard.as_ref().is_some_and(|s| s.is_active())
+        guard.as_ref().is_some_and(CoreSubscription::is_active)
     }
 
-    /// The schema of the subscription as a PyArrow Schema.
     #[getter]
     fn schema(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let guard = self.inner.0.lock();
         match guard.as_ref() {
             Some(sub) => {
-                let schema = sub.schema();
-                let py_schema = PySchema::from(schema);
-                let obj = py_schema.into_pyarrow(py)?;
+                let obj = PySchema::from(sub.schema()).into_pyarrow(py)?;
                 Ok(obj.into_pyobject(py)?.into_any().unbind())
             }
             None => Err(pyo3::exceptions::PyRuntimeError::new_err(
@@ -219,64 +402,81 @@ impl AsyncStreamSubscription {
         }
     }
 
-    /// Blocking wait for the next batch.
+    /// Await the next data or checkpoint frame.
+    fn next_frame<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let cell = Arc::clone(&self.inner);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let mut guard = cell.0.lock();
+                match guard.as_mut() {
+                    Some(sub) => {
+                        futures::executor::block_on(sub.next_frame_async()).into_pyresult()
+                    }
+                    None => Ok(None),
+                }
+            })
+            .await
+            .map_err(join_error)??;
+            Ok(result.map(SubscriptionFrame::from_core))
+        })
+    }
+
+    /// Non-blocking poll for the next data or checkpoint frame.
+    fn try_next_frame(&self, py: Python<'_>) -> PyResult<Option<SubscriptionFrame>> {
+        py.detach(|| {
+            let mut guard = self.inner.0.lock();
+            match guard.as_mut() {
+                Some(sub) => Ok(sub
+                    .try_next_frame()
+                    .into_pyresult()?
+                    .map(SubscriptionFrame::from_core)),
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Blocking compatibility method returning only the next data batch.
     fn next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
+        py.detach(|| {
             let mut guard = self.inner.0.lock();
             match guard.as_mut() {
-                Some(sub) => match sub.next().into_pyresult()? {
-                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
-                    None => Ok(None),
-                },
+                Some(sub) => next_batch(sub).into_pyresult(),
                 None => Ok(None),
             }
         })
     }
 
-    /// Blocking wait for the next batch with a timeout in milliseconds.
-    ///
-    /// Raises `SubscriptionError` (code `SUBSCRIPTION_TIMEOUT`) if the
-    /// timeout expires without data.  Returns `None` only when the
-    /// subscription stream itself has ended.
+    /// Blocking compatibility timeout returning only a data batch.
     fn next_timeout(&self, py: Python<'_>, timeout_ms: u64) -> PyResult<Option<QueryResult>> {
-        let timeout = Duration::from_millis(timeout_ms);
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
+        py.detach(|| {
             let mut guard = self.inner.0.lock();
             match guard.as_mut() {
-                Some(sub) => match sub.next_timeout(timeout).into_pyresult()? {
-                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
-                    None => Ok(None),
-                },
+                Some(sub) => {
+                    next_batch_timeout(sub, Duration::from_millis(timeout_ms)).into_pyresult()
+                }
                 None => Ok(None),
             }
         })
     }
 
-    /// Non-blocking poll for the next batch.
+    /// Non-blocking compatibility poll returning only a data batch.
     fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        py.allow_threads(|| {
-            let _rt = runtime().enter();
+        py.detach(|| {
             let mut guard = self.inner.0.lock();
             match guard.as_mut() {
-                Some(sub) => match sub.try_next().into_pyresult()? {
-                    Some(batch) => Ok(Some(QueryResult::from_batch(batch))),
-                    None => Ok(None),
-                },
+                Some(sub) => try_next_batch(sub).into_pyresult(),
                 None => Ok(None),
             }
         })
     }
 
-    /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut guard = self.inner.0.lock();
             if let Some(sub) = guard.as_mut() {
                 sub.cancel();
             }
-            let _ = guard.take();
+            guard.take();
             Ok(())
         })
     }
@@ -284,7 +484,7 @@ impl AsyncStreamSubscription {
     fn __repr__(&self) -> String {
         let guard = self.inner.0.lock();
         match guard.as_ref() {
-            Some(s) if s.is_active() => "AsyncStreamSubscription(active)".to_owned(),
+            Some(sub) if sub.is_active() => "AsyncStreamSubscription(active)".to_owned(),
             Some(_) => "AsyncStreamSubscription(finished)".to_owned(),
             None => "AsyncStreamSubscription(cancelled)".to_owned(),
         }
@@ -299,27 +499,19 @@ impl AsyncStreamSubscription {
             return Err(PyStopAsyncIteration::new_err(()));
         }
 
-        let cell = self.inner.clone();
+        let cell = Arc::clone(&self.inner);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            // Run the blocking next() on the tokio blocking thread pool
-            // so we don't block the Python thread or a tokio worker.
             let result = tokio::task::spawn_blocking(move || {
-                let _rt = runtime().enter();
                 let mut guard = cell.0.lock();
                 match guard.as_mut() {
-                    Some(sub) => sub.next().into_pyresult(),
+                    Some(sub) => futures::executor::block_on(next_batch_async(sub)).into_pyresult(),
                     None => Ok(None),
                 }
             })
             .await
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Task join error: {e}"))
-            })??;
+            .map_err(join_error)??;
 
-            match result {
-                Some(batch) => Ok(QueryResult::from_batch(batch)),
-                None => Err(PyStopAsyncIteration::new_err(())),
-            }
+            result.ok_or_else(|| PyStopAsyncIteration::new_err(()))
         })
     }
 
@@ -363,9 +555,13 @@ impl AsyncStreamSubscription {
 }
 
 impl AsyncStreamSubscription {
-    pub fn from_core(sub: laminar_db::api::ArrowSubscription) -> Self {
+    pub fn from_core(sub: CoreSubscription) -> Self {
         Self {
             inner: Arc::new(SyncCell(Mutex::new(Some(sub)))),
         }
     }
+}
+
+fn join_error(error: tokio::task::JoinError) -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err(format!("Task join error: {error}"))
 }

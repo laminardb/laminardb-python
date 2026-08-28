@@ -85,7 +85,8 @@ create_exception!(
 pub fn core_error_to_pyerr(err: laminar_db::api::ApiError) -> PyErr {
     use laminar_db::api::codes;
     let code = err.code();
-    let msg = format!("{} ({}): {}", error_code_name(code), code, err.message());
+    let detail = err.message();
+    let msg = format!("{} ({}): {}", error_code_name(code), code, detail);
     let py_err = match code {
         codes::CONNECTION_FAILED | codes::CONNECTION_CLOSED | codes::CONNECTION_IN_USE => {
             ConnectionError::new_err(msg)
@@ -103,13 +104,20 @@ pub fn core_error_to_pyerr(err: laminar_db::api::ApiError) -> PyErr {
         codes::SUBSCRIPTION_FAILED | codes::SUBSCRIPTION_CLOSED | codes::SUBSCRIPTION_TIMEOUT => {
             SubscriptionError::new_err(msg)
         }
+        codes::INTERNAL_ERROR if detail.contains("Checkpoint error:") => {
+            CheckpointError::new_err(msg)
+        }
+        codes::INTERNAL_ERROR if detail.contains("Connector error:") => {
+            ConnectorError::new_err(msg)
+        }
+        codes::INTERNAL_ERROR if detail.contains("Pipeline error:") => StreamError::new_err(msg),
         600..=699 => StreamError::new_err(msg),
         700..=799 => CheckpointError::new_err(msg),
         800..=899 => ConnectorError::new_err(msg),
         _ => LaminarError::new_err(msg),
     };
     // Attach the numeric error code to the exception instance
-    Python::with_gil(|py| {
+    let _ = Python::try_attach(|py| {
         let val = py_err.value(py);
         let _ = val.setattr("code", code);
     });

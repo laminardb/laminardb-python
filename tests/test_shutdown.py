@@ -81,3 +81,6 @@ class TestExportedTypes:
 
     def test_stream_metrics_importable(self):
         assert hasattr(laminardb, "StreamMetrics")
+
+    def test_subscription_frame_importable(self):
+        assert hasattr(laminardb, "SubscriptionFrame")

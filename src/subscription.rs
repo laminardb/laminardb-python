@@ -29,7 +29,7 @@ impl Subscription {
 
     /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut guard = self.inner.lock();
             if let Some(stream) = guard.as_mut() {
                 stream.cancel();
@@ -40,7 +40,7 @@ impl Subscription {
 
     /// Non-blocking poll for the next result.
     fn try_next(&self, py: Python<'_>) -> PyResult<Option<QueryResult>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = crate::async_support::runtime().enter();
             let mut guard = self.inner.lock();
             match guard.as_mut() {
@@ -67,7 +67,7 @@ impl Subscription {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<QueryResult> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let _rt = crate::async_support::runtime().enter();
             let mut guard = self.inner.lock();
             match guard.as_mut() {

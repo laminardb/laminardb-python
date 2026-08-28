@@ -26,8 +26,15 @@ unsafe impl Sync for Writer {}
 impl Writer {
     /// Add data to the writer (writes through immediately).
     fn insert(&self, py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<()> {
-        let batches = conversion::python_to_batches(py, data, None)?;
-        py.allow_threads(|| {
+        let schema = {
+            let guard = self.inner.lock();
+            guard
+                .as_ref()
+                .ok_or_else(|| IngestionError::new_err("Writer is closed"))?
+                .schema()
+        };
+        let batches = conversion::python_to_batches(py, data, Some(schema.as_ref()))?;
+        py.detach(|| {
             let mut guard = self.inner.lock();
             let writer = guard
                 .as_mut()
@@ -41,7 +48,7 @@ impl Writer {
 
     /// Flush the writer buffer. Returns 0 (flush has no row count).
     fn flush(&self, py: Python<'_>) -> PyResult<u64> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut guard = self.inner.lock();
             let writer = guard
                 .as_mut()
@@ -58,7 +65,7 @@ impl Writer {
             guard.take()
         };
         if let Some(w) = writer {
-            py.allow_threads(|| w.close().into_pyresult())?;
+            py.detach(|| w.close().into_pyresult())?;
         }
         Ok(())
     }

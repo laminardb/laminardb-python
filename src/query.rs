@@ -8,10 +8,14 @@ use pyo3_arrow::{PySchema, PyTable};
 use crate::conversion;
 
 /// The result of a SQL query.
-#[pyclass(name = "QueryResult")]
+#[pyclass(name = "QueryResult", skip_from_py_object)]
+#[derive(Clone)]
 pub struct QueryResult {
     batches: Vec<RecordBatch>,
     schema: SchemaRef,
+    // A named-subscription batch retains its shared-log charge until all
+    // Python-visible clones of the result have been released.
+    _subscription_lease: Option<laminar_db::subscription::SubscriptionFrameLease>,
 }
 
 unsafe impl Send for QueryResult {}
@@ -228,7 +232,11 @@ impl QueryResult {
 
     /// Create from pre-collected batches and schema.
     pub fn new(batches: Vec<RecordBatch>, schema: SchemaRef) -> Self {
-        Self { batches, schema }
+        Self {
+            batches,
+            schema,
+            _subscription_lease: None,
+        }
     }
 
     /// Total row count across all batches.
@@ -250,7 +258,11 @@ impl QueryResult {
     pub fn from_core(result: laminar_db::api::QueryResult) -> Self {
         let schema = result.schema();
         let batches = result.into_batches();
-        Self { batches, schema }
+        Self {
+            batches,
+            schema,
+            _subscription_lease: None,
+        }
     }
 
     /// Create from a single RecordBatch (used by stream iterator).
@@ -259,6 +271,20 @@ impl QueryResult {
         Self {
             batches: vec![batch],
             schema,
+            _subscription_lease: None,
+        }
+    }
+
+    /// Create from a named-subscription batch and retain its shared-log lease.
+    pub fn from_subscription_batch(
+        batch: RecordBatch,
+        lease: laminar_db::subscription::SubscriptionFrameLease,
+    ) -> Self {
+        let schema = batch.schema();
+        Self {
+            batches: vec![batch],
+            schema,
+            _subscription_lease: Some(lease),
         }
     }
 }
