@@ -1,8 +1,8 @@
 [package]
 name = "laminardb"
-version = "0.18.13"
+version = "0.30.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "MIT"
 description = "Python bindings for LaminarDB streaming SQL database"
 publish = false
@@ -12,48 +12,46 @@ name = "_laminardb"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.27", features = ["extension-module", "abi3-py311", "anyhow"] }
-pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
-pyo3-arrow = "0.15"
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py311", "anyhow"] }
+pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
+pyo3-arrow = "0.17"
 
-arrow = { version = "57", features = ["ffi"] }
-arrow-array = "57"
-arrow-schema = "57"
-arrow-json = "57"
-arrow-csv = "57"
+arrow = { version = "=58.4.0", features = ["ffi"] }
+arrow-array = "=58.4.0"
+arrow-schema = "=58.4.0"
+arrow-json = "=58.4.0"
+arrow-csv = "=58.4.0"
 
-laminar-db = { path = "laminardb/crates/laminar-db", package = "laminar-db", features = [
+laminar-db = { path = "laminardb/crates/laminar-db", package = "laminar-db", default-features = false, features = [
     "api",
     "kafka",
     "postgres-cdc",
     "postgres-sink",
     "delta-lake",
-    "delta",
     "websocket",
-    "mysql-cdc",
     "iceberg",
     "parquet-lookup",
     "files",
     "mongodb-cdc",
+    "otel",
+    "nats",
 ] }
 laminar-core = { path = "laminardb/crates/laminar-core", package = "laminar-core" }
 
-# Direct connector dependency for cloud storage features (optional)
-laminar-connectors = { path = "laminardb/crates/laminar-connectors", package = "laminar-connectors", optional = true }
-
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+futures = "0.3"
 parking_lot = "0.12"
 anyhow = "1"
 
 [features]
 default = []
 # Cloud storage backends for Delta Lake / Iceberg connectors
-delta-lake-s3 = ["dep:laminar-connectors", "laminar-connectors/delta-lake-s3"]
-delta-lake-azure = ["dep:laminar-connectors", "laminar-connectors/delta-lake-azure"]
-delta-lake-gcs = ["dep:laminar-connectors", "laminar-connectors/delta-lake-gcs"]
-delta-lake-unity = ["dep:laminar-connectors", "laminar-connectors/delta-lake-unity"]
-delta-lake-glue = ["dep:laminar-connectors", "laminar-connectors/delta-lake-glue"]
+delta-lake-s3 = ["laminar-db/delta-lake-s3"]
+delta-lake-azure = ["laminar-db/delta-lake-azure"]
+delta-lake-gcs = ["laminar-db/delta-lake-gcs"]
+delta-lake-unity = ["laminar-db/delta-lake-unity"]
+delta-lake-glue = ["laminar-db/delta-lake-glue"]
 # Enable all cloud storage backends
 cloud-all = ["delta-lake-s3", "delta-lake-azure", "delta-lake-gcs"]
 

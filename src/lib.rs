@@ -1,13 +1,8 @@
 //! LaminarDB Python bindings — streaming SQL database.
 //!
-//! This crate provides Python bindings for `laminar-db` using PyO3 0.27.
+//! This crate provides Python bindings for `laminar-db` using PyO3 0.28.
 //! It exposes a high-level API for connecting to databases, inserting data
 //! in multiple formats, querying with SQL, and subscribing to continuous queries.
-
-// PyO3 0.27 deprecates `allow_threads` and `downcast` in favor of 0.28 APIs
-// (`detach` and `cast`), but pyo3-arrow 0.15 requires PyO3 0.27. Suppress
-// until the ecosystem catches up with 0.28.
-#![allow(deprecated)]
 
 mod async_support;
 mod callback;
@@ -44,6 +39,7 @@ fn _laminardb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<connection::QueryStreamIter>()?;
     m.add_class::<stream_subscription::StreamSubscription>()?;
     m.add_class::<stream_subscription::AsyncStreamSubscription>()?;
+    m.add_class::<stream_subscription::SubscriptionFrame>()?;
     m.add_class::<callback::CallbackSubscription>()?;
     m.add_class::<execute::ExecuteResult>()?;
     m.add_class::<config::PyLaminarConfig>()?;
@@ -136,7 +132,7 @@ fn open(
     path: &str,
     config: Option<&config::PyLaminarConfig>,
 ) -> PyResult<PyConnection> {
-    py.allow_threads(|| {
+    py.detach(|| {
         let _rt = async_support::runtime().enter();
         let conn = match config {
             Some(cfg) => {
@@ -164,7 +160,7 @@ fn connect(py: Python<'_>, uri: &str) -> PyResult<PyConnection> {
              Got: {uri:?}"
         )));
     }
-    py.allow_threads(|| {
+    py.detach(|| {
         let _rt = async_support::runtime().enter();
         let conn = laminar_db::api::Connection::open().into_pyresult()?;
         Ok(PyConnection::from_core(conn))

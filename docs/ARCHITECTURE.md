@@ -12,7 +12,7 @@
 │  result = db.query("SELECT 1 + 1 AS answer")        │
 │  df = result.to_pandas()                             │
 └──────────────────────┬──────────────────────────────┘
-                       │  Python C API (PyO3 0.27)
+                       │  Python C API (PyO3 0.28)
 ┌──────────────────────▼──────────────────────────────┐
 │              laminardb (Rust cdylib)                  │
 │                                                      │
@@ -60,7 +60,7 @@
 | `query.rs` | `QueryResult` pyclass with multi-format export |
 | `subscription.rs` | `Subscription` pyclass for continuous queries (sync) |
 | `async_support.rs` | Tokio runtime, `AsyncSubscription` for asyncio |
-| `stream_subscription.rs` | `StreamSubscription` + `AsyncStreamSubscription` for named streams |
+| `stream_subscription.rs` | Framed sync/async named-stream subscriptions and `SubscriptionFrame` |
 | `execute.rs` | `ExecuteResult` pyclass for DDL/DML introspection |
 | `config.rs` | `LaminarConfig` pyclass for database configuration |
 | `catalog.rs` | `SourceInfo`, `SinkInfo`, `StreamInfo`, `QueryInfo` catalog types |
@@ -76,7 +76,7 @@ Python Object (dict, DataFrame, RecordBatch, JSON, CSV)
     ▼ conversion.rs: python_to_batches()
 Arrow RecordBatch[]
     │
-    ▼ connection.rs: py.allow_threads()
+    ▼ connection.rs: py.detach()
 laminar_db::api::Connection::insert()
 ```
 
@@ -98,7 +98,8 @@ Python Object (PyArrow Table, Pandas DF, Polars DF, dicts)
 - `Connection` wraps `laminar_db::api::Connection` in `Arc` for safe sharing
 - `Writer` uses `parking_lot::Mutex` for its internal buffer
 - `Subscription` uses `Arc<Mutex<...>>` + `AtomicBool` for state
-- ALL blocking Rust calls release the GIL via `py.allow_threads()`
+- ALL blocking Rust calls detach from the interpreter via `py.detach()`
+- Named-stream batches retain the core subscription lease for the lifetime of the Python result
 - Tokio runtime is lazily initialized as a global `OnceLock`
 
 ## Error Handling Strategy
@@ -121,7 +122,7 @@ Internal errors use `anyhow` for context chains.
 ## Performance Considerations
 
 1. **Zero-copy exports**: Arrow PyCapsule interface (`__arrow_c_stream__`) is tried first
-2. **GIL release**: Every blocking operation calls `py.allow_threads()`
+2. **Interpreter detach**: Every blocking operation calls `py.detach()`
 3. **Batch buffering**: `Writer` accumulates batches before flushing
 4. **Lazy runtime**: Tokio runtime only created on first use
 5. **LTO + strip**: Release builds use link-time optimization and symbol stripping

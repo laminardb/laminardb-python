@@ -1,13 +1,11 @@
 //! Type conversion between Python objects and Arrow RecordBatches.
 //!
 //! Conversion priority (input):
-//!   1. Arrow PyCapsule interface (__arrow_c_stream__ / __arrow_c_array__)
-//!   2. PyArrow RecordBatch / Table
-//!   3. Pandas DataFrame (via pyarrow bridge)
-//!   4. Polars DataFrame (via .to_arrow())
-//!   5. Dict of lists (columnar)
-//!   6. List of dicts (row-oriented)
-//!   7. Single dict (one row)
+//!   1. Native dict/list inputs
+//!   2. Arrow PyCapsule interface (__arrow_c_stream__ / __arrow_c_array__)
+//!   3. PyArrow RecordBatch / Table
+//!   4. Pandas DataFrame (via pyarrow bridge)
+//!   5. Polars DataFrame (via .to_arrow())
 
 use std::sync::Arc;
 
@@ -28,40 +26,114 @@ use crate::error::IngestionError;
 pub fn python_to_batches(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
-    _schema: Option<&Schema>,
+    schema: Option<&Schema>,
 ) -> PyResult<Vec<RecordBatch>> {
     // 1. Plain Python dicts and lists — check FIRST to avoid Arrow extraction
     //    intercepting native Python types (pyo3-arrow's extract can consume errors
     //    that prevent fallthrough to the dict/list handler).
-    if data.downcast::<PyDict>().is_ok() || data.downcast::<PyList>().is_ok() {
-        return try_python_dicts(py, data);
+    if data.cast::<PyDict>().is_ok() || data.cast::<PyList>().is_ok() {
+        return try_python_dicts(py, data)
+            .and_then(|batches| align_batches_to_schema(batches, schema));
     }
 
     // 2. Arrow PyCapsule interface (PyTable handles __arrow_c_stream__)
     if let Ok(table) = data.extract::<PyTable>() {
         let (batches, _schema) = table.into_inner();
-        return Ok(batches);
+        return align_batches_to_schema(batches, schema);
     }
 
     // 3. Try as single RecordBatch (__arrow_c_array__)
     if let Ok(batch) = data.extract::<PyRecordBatch>() {
-        return Ok(vec![batch.into_inner()]);
+        return align_batches_to_schema(vec![batch.into_inner()], schema);
     }
 
     // 4. Pandas DataFrame
     if let Ok(batches) = try_pandas(py, data) {
-        return Ok(batches);
+        return align_batches_to_schema(batches, schema);
     }
 
     // 5. Polars DataFrame
     if let Ok(batches) = try_polars(py, data) {
-        return Ok(batches);
+        return align_batches_to_schema(batches, schema);
     }
 
     Err(PyTypeError::new_err(
         "Unsupported data type. Expected: Arrow-compatible object, PyArrow RecordBatch/Table, \
          Pandas DataFrame, Polars DataFrame, dict, list[dict], or dict of lists.",
     ))
+}
+
+/// Reorder and cast input columns to a source schema, replacing
+/// producer-specific schema metadata. PyArrow and Polars may use a different
+/// string representation or timestamp precision than SQL declarations; those
+/// representation-only differences are normalized here.
+pub(crate) fn align_batches_to_schema(
+    batches: Vec<RecordBatch>,
+    schema: Option<&Schema>,
+) -> PyResult<Vec<RecordBatch>> {
+    let Some(schema) = schema else {
+        return Ok(batches);
+    };
+    let schema_ref = Arc::new(schema.clone());
+    batches
+        .into_iter()
+        .map(|batch| {
+            if batch.num_columns() != schema.fields().len() {
+                return Err(IngestionError::new_err(format!(
+                    "Schema mismatch: expected {} columns, got {}",
+                    schema.fields().len(),
+                    batch.num_columns()
+                )));
+            }
+
+            let actual_schema = batch.schema();
+            let columns = schema
+                .fields()
+                .iter()
+                .map(|field| {
+                    let index = actual_schema.index_of(field.name()).map_err(|_| {
+                        IngestionError::new_err(format!(
+                            "Schema mismatch: input is missing column '{}'",
+                            field.name()
+                        ))
+                    })?;
+                    let column = &batch.columns()[index];
+                    if column.data_type() == field.data_type() {
+                        Ok(Arc::clone(column))
+                    } else if representation_cast(column.data_type(), field.data_type()) {
+                        arrow::compute::cast(column.as_ref(), field.data_type()).map_err(|error| {
+                            IngestionError::new_err(format!(
+                                "Cannot normalize input column '{}' from {} to {}: {error}",
+                                field.name(),
+                                column.data_type(),
+                                field.data_type()
+                            ))
+                        })
+                    } else {
+                        Err(IngestionError::new_err(format!(
+                            "Schema mismatch for input column '{}': expected {}, got {}",
+                            field.name(),
+                            field.data_type(),
+                            column.data_type()
+                        )))
+                    }
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+
+            RecordBatch::try_new(Arc::clone(&schema_ref), columns).map_err(|error| {
+                IngestionError::new_err(format!("Invalid input batch for source schema: {error}"))
+            })
+        })
+        .collect()
+}
+
+fn representation_cast(from: &arrow_schema::DataType, to: &arrow_schema::DataType) -> bool {
+    use arrow_schema::DataType::{LargeUtf8, Timestamp, Utf8, Utf8View};
+    match (from, to) {
+        (Utf8 | LargeUtf8 | Utf8View, Utf8 | LargeUtf8 | Utf8View) => true,
+        (Timestamp(_, from_tz), Timestamp(_, to_tz)) => from_tz == to_tz,
+        _ => false,
+    }
 }
 
 /// Try converting a Pandas DataFrame via PyArrow.
@@ -102,12 +174,12 @@ fn try_polars(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Vec<RecordBat
 /// Try converting Python dicts/lists to Arrow RecordBatches.
 fn try_python_dicts(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Vec<RecordBatch>> {
     // Single dict — could be columnar or single row
-    if let Ok(dict) = data.downcast::<PyDict>() {
+    if let Ok(dict) = data.cast::<PyDict>() {
         return dict_to_batches(py, dict);
     }
 
     // List of dicts
-    if let Ok(list) = data.downcast::<PyList>() {
+    if let Ok(list) = data.cast::<PyList>() {
         if list.is_empty() {
             return Err(PyTypeError::new_err("empty list"));
         }
@@ -126,7 +198,7 @@ fn dict_to_batches(py: Python<'_>, dict: &Bound<'_, PyDict>) -> PyResult<Vec<Rec
         .values()
         .get_item(0)
         .map_err(|_| PyTypeError::new_err("empty dict"))?;
-    let is_columnar = first_value.downcast::<PyList>().is_ok();
+    let is_columnar = first_value.cast::<PyList>().is_ok();
 
     if is_columnar {
         columnar_dict_to_batch(py, dict)
@@ -154,16 +226,14 @@ fn list_of_dicts_to_batches(
     list: &Bound<'_, PyList>,
 ) -> PyResult<Vec<RecordBatch>> {
     // Try pyarrow first (most efficient, handles numpy types etc.)
-    if let Ok(pa) = py.import("pyarrow") {
-        if let Ok(table) = pa
+    if let Ok(pa) = py.import("pyarrow")
+        && let Ok(table) = pa
             .getattr("Table")
-            .and_then(|t| t.call_method1("from_pylist", (list,)))
-        {
-            if let Ok(py_table) = table.extract::<PyTable>() {
-                let (batches, _schema) = py_table.into_inner();
-                return Ok(batches);
-            }
-        }
+            .and_then(|table| table.call_method1("from_pylist", (list,)))
+        && let Ok(py_table) = table.extract::<PyTable>()
+    {
+        let (batches, _schema) = py_table.into_inner();
+        return Ok(batches);
     }
 
     // Fallback: serialize each dict as NDJSON (one JSON object per line).
@@ -327,7 +397,7 @@ pub fn python_to_schema(_py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Sch
     }
 
     // Dict mapping: {"col_name": "type_string"}
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         let mut fields = Vec::new();
         for (key, value) in dict.iter() {
             let name: String = key.extract()?;

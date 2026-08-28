@@ -75,7 +75,7 @@ impl AsyncSubscription {
 
     /// Cancel the subscription.
     fn cancel(&self, py: Python<'_>) -> PyResult<()> {
-        py.allow_threads(|| {
+        py.detach(|| {
             let mut guard = self.inner.0.lock();
             if let Some(stream) = guard.as_mut() {
                 stream.cancel();

@@ -1,5 +1,7 @@
 # Rust
 /target/
+/laminardb/
+/.claude/
 
 # Python
 __pycache__/

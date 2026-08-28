@@ -85,6 +85,10 @@ with conn.writer("sensors") as w:
     print(w.current_watermark)
 ```
 
+SQL columns used by `WATERMARK FOR` or event-time window functions must be
+declared as `TIMESTAMP`. The writer's explicit watermark value remains an epoch
+millisecond integer.
+
 ## Query Results
 
 ```python
@@ -156,6 +160,17 @@ sub.cancel()
 ```python
 sub = conn.subscribe_stream("alerts")
 sub.schema                            # pyarrow.Schema
+
+# Framed API: preserves both data and durable checkpoint progress.
+frame = sub.try_next_frame()          # SubscriptionFrame | None
+frame = sub.next_frame()              # blocking
+frame = sub.next_frame_timeout(1000)  # timeout in milliseconds
+if frame is not None and frame.is_batch:
+    frame.batch.df()
+elif frame is not None:               # checkpoint barrier
+    print(frame.epoch, frame.checkpoint_id, frame.through_sequence)
+
+# Batch-only compatibility API: checkpoint barriers are skipped.
 batch = sub.try_next()                # non-blocking
 batch = sub.next()                    # blocking (indefinite)
 try:
@@ -166,10 +181,14 @@ sub.cancel()
 
 # Async variant:
 sub = await conn.subscribe_stream_async("alerts")
+frame = await sub.next_frame()
 async for batch in sub:
     batch.df()
 sub.cancel()
 ```
+
+`SubscriptionFrame.sequence` is local to the subscription portal; durable
+progress is identified by a barrier's checkpoint `epoch`.
 
 ### Callback subscriptions
 
@@ -210,11 +229,12 @@ for q in conn.queries():    print(q.id, q.sql, q.active)                 # Query
 m = conn.metrics()          # PipelineMetrics
 m.total_events_ingested, m.total_events_emitted, m.total_events_dropped
 m.total_cycles, m.uptime_secs, m.state, m.pipeline_watermark
+m.mv_updates, m.mv_bytes_stored
 
 for sm in conn.all_source_metrics():   # SourceMetrics
     print(sm.name, sm.total_events, sm.utilization, sm.is_backpressured, sm.watermark)
 for stm in conn.all_stream_metrics():  # StreamMetrics
-    print(stm.name, stm.total_events, stm.watermark, stm.sql)
+    print(stm.name, stm.total_events, stm.sql)
 
 # Topology (DAG)
 topo = conn.topology()
@@ -276,7 +296,7 @@ python -m venv .venv && source .venv/bin/activate  # .venv\Scripts\activate on W
 pip install maturin && maturin develop --extras dev
 ```
 
-**Prerequisites:** Rust 1.85+, Python 3.11+, cmake, pkg-config, libclang-dev (Linux)
+**Prerequisites:** Rust 1.95+, Python 3.11+, cmake, pkg-config, libclang-dev (Linux)
 
 ```bash
 pytest tests/ -v               # tests

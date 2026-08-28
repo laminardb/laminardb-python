@@ -98,6 +98,7 @@ Comprehensive tracker of every binding capability. **76 Done, 4 Planned**.
 | Async subscription | Done | `async_support.rs` | `subscribe_async(sql)` | `test_subscription.py` |
 | Named stream subscription | Done | `stream_subscription.rs` | `subscribe_stream(name)` | `test_stream_subscription.py` |
 | Async stream subscription | Done | `stream_subscription.rs` | `subscribe_stream_async(name)` | `test_stream_subscription.py` |
+| Subscription frames | Done | `stream_subscription.rs` | `SubscriptionFrame`, `next_frame*()` | `test_stream_subscription.py` |
 | `is_active` property | Done | `subscription.rs`, `stream_subscription.rs` | property | `test_subscription.py` |
 | `cancel()` | Done | `subscription.rs`, `stream_subscription.rs` | `cancel()` | `test_subscription.py` |
 | `try_next()` | Done | `subscription.rs`, `stream_subscription.rs` | `try_next()` | `test_subscription.py` |
@@ -112,7 +113,7 @@ Comprehensive tracker of every binding capability. **76 Done, 4 Planned**.
 |---------|--------|-------------|------------|------|
 | `start()` | Done | `connection.rs` | `conn.start()` | `test_connection.py` |
 | `shutdown()` | Done | `connection.rs` | `conn.shutdown()` | `test_shutdown.py` |
-| `checkpoint()` | Done | `connection.rs` | `conn.checkpoint()` | `test_connection.py` |
+| `checkpoint()` | Done | `connection.rs` | `conn.checkpoint()` | `test_checkpoint.py` |
 | `cancel_query(id)` | Done | `connection.rs` | `conn.cancel_query(id)` | `test_shutdown.py` |
 | `is_checkpoint_enabled` | Done | `connection.rs` | property | `test_connection.py` |
 | `pipeline_state` | Done | `connection.rs` | property | `test_metrics.py` |
@@ -142,9 +143,9 @@ Comprehensive tracker of every binding capability. **76 Done, 4 Planned**.
 | `all_source_metrics()` | Done | `connection.rs` | `conn.all_source_metrics()` | `test_metrics.py` |
 | `stream_metrics(name)` | Done | `connection.rs` | `conn.stream_metrics(name)` | `test_metrics.py` |
 | `all_stream_metrics()` | Done | `connection.rs` | `conn.all_stream_metrics()` | `test_metrics.py` |
-| `PipelineMetrics` | Done | `metrics.rs` | Events, cycles, uptime, state | `test_metrics.py` |
+| `PipelineMetrics` | Done | `metrics.rs` | Events, cycles, MV storage, uptime, state | `test_metrics.py` |
 | `SourceMetrics` | Done | `metrics.rs` | Events, pending, capacity, watermark | `test_metrics.py` |
-| `StreamMetrics` | Done | `metrics.rs` | Events, pending, capacity, SQL | `test_metrics.py` |
+| `StreamMetrics` | Done | `metrics.rs` | Events and SQL | `test_metrics.py` |
 | `PipelineTopology` | Done | `metrics.rs` | Nodes and edges | `test_metrics.py` |
 | `PipelineNode` | Done | `metrics.rs` | Name, type, schema, SQL | `test_metrics.py` |
 | `PipelineEdge` | Done | `metrics.rs` | from_node, to_node | `test_metrics.py` |
@@ -160,7 +161,7 @@ Comprehensive tracker of every binding capability. **76 Done, 4 Planned**.
 | `SchemaError` | Done | `error.rs` | `SchemaError` | `test_errors.py` |
 | `SubscriptionError` | Done | `error.rs` | `SubscriptionError` | `test_errors.py` |
 | `StreamError` | Done | `error.rs` | `StreamError` | `test_module_functions.py` |
-| `CheckpointError` | Done | `error.rs` | `CheckpointError` | `test_module_functions.py` |
+| `CheckpointError` | Done | `error.rs` | `CheckpointError` | `test_checkpoint.py`, `test_errors.py` |
 | `ConnectorError` | Done | `error.rs` | `ConnectorError` | `test_module_functions.py` |
 | Error code mapping | Done | `error.rs` | `IntoPyResult` trait | — |
 | Numeric error codes | Done | `error.rs` | `.code` attribute + `laminardb.codes` | `test_errors.py` |
@@ -194,7 +195,7 @@ Comprehensive tracker of every binding capability. **76 Done, 4 Planned**.
 | Feature | Status | Rust Source | Python API | Test |
 |---------|--------|-------------|------------|------|
 | PEP 561 type stubs | Done | `_laminardb.pyi` | `py.typed` marker | mypy |
-| GIL release | Done | all modules | `py.allow_threads()` | — |
+| Interpreter detach | Done | all modules | `py.detach()` | — |
 | Free-threaded Python | Done | all modules | `Send + Sync` | — |
 | CI pipeline | Done | `.github/workflows/` | lint, test, typecheck | — |
 | PyPI publishing | Done | `release.yml` | multi-platform wheels | — |

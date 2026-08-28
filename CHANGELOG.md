@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-08-27
+
+### Added
+
+- Named-stream `SubscriptionFrame` support for data batches and durable
+  checkpoint barriers, including synchronous, timeout, non-blocking, and
+  asynchronous frame reads.
+- Pipeline materialized-view metrics: `mv_updates` and `mv_bytes_stored`.
+- NATS, OpenTelemetry, file, and MongoDB CDC connector features.
+
+### Changed
+
+- Updated the LaminarDB core to 0.30.0, Arrow to 58.4, PyO3 to 0.28, and
+  `pyo3-arrow` to 0.17; the minimum Rust version is now 1.95.
+- Named-stream batch-only iteration remains compatible but skips checkpoint
+  barriers; frame-aware applications should use `next_frame*()`.
+- `StreamMetrics` now reports `name`, `total_events`, and `sql`, matching the
+  current core metrics model.
+- Blocking bindings use PyO3's `py.detach()` API.
+- Windows MSVC builds use the Rust toolchain's bundled `rust-lld` linker.
+- DataFrame and Arrow ingestion reorders columns by declared name and
+  normalizes compatible string representations and timestamp precisions to the
+  declared source schema.
+- Checkpoint failures are surfaced as `CheckpointError`; manual checkpoints
+  require a started pipeline with a stream coordinator.
+
+### Removed
+
+- Obsolete MySQL CDC and legacy Delta feature flags.
+- `PipelineMetrics.last_cycle_duration_ns` and obsolete stream queue/watermark
+  fields removed by the core metrics API.
+
 ## [0.15.0] - 2026-02-22
 
 ### Added
@@ -92,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS x86_64, aarch64 (Apple Silicon)
 - Windows x86_64
 
-[Unreleased]: https://github.com/laminardb/laminardb-python/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/laminardb/laminardb-python/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/laminardb/laminardb-python/compare/v0.18.13...v0.30.0
 [0.15.0]: https://github.com/laminardb/laminardb-python/compare/v0.1.0...v0.15.0
 [0.1.0]: https://github.com/laminardb/laminardb-python/releases/tag/v0.1.0
