@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build (for example, v0.30.0)"
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 permissions:
   contents: read
@@ -15,11 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Clone laminardb monorepo
         run: git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
       - name: Extract tag version
         id: tag
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
       - name: Check Cargo.toml version
         run: |
           cargo_version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
@@ -51,6 +62,8 @@ jobs:
             target: x86_64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Clone laminardb monorepo
         run: git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
       - uses: actions/setup-python@v5
@@ -64,12 +77,13 @@ jobs:
           args: --release --out dist
           manylinux: "2_28"
           before-script-linux: |
-            # Install build dependencies for rdkafka (cmake, ssl, curl, sasl) and rocksdb (clang)
+            # Install build dependencies for rdkafka (cmake, ssl, curl, sasl),
+            # rocksdb (clang), and vendored OpenSSL (Perl IPC::Cmd).
             if command -v yum &> /dev/null; then
-              yum install -y cmake3 clang-devel pkgconfig openssl-devel libcurl-devel cyrus-sasl-devel zlib-devel
+              yum install -y cmake3 clang-devel pkgconfig openssl-devel libcurl-devel cyrus-sasl-devel zlib-devel perl-IPC-Cmd
               ln -sf /usr/bin/cmake3 /usr/bin/cmake || true
             elif command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y cmake pkg-config libclang-dev zlib1g-dev libcurl4-openssl-dev libsasl2-dev
+              apt-get update && apt-get install -y cmake pkg-config libclang-dev zlib1g-dev libcurl4-openssl-dev libsasl2-dev libipc-cmd-perl
             fi
             # Ensure the monorepo exists inside the container
             if [ ! -d "laminardb" ]; then
@@ -86,6 +100,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Clone laminardb monorepo
         run: git clone --depth 1 https://github.com/laminardb/laminardb.git laminardb
       - name: Build sdist
