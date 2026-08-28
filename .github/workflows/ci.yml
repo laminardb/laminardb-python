@@ -70,12 +70,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Install and type-check
         run: |
           python -m venv .venv
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install maturin mypy pyarrow pandas-stubs
-          maturin develop
+          pip install maturin
+          maturin develop --extras dev
           mypy python/laminardb --strict
